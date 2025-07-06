@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD 99)
 add_subdirectory(librtp)
 
 find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET librga)
 pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(MSGPACK REQUIRED IMPORTED_TARGET rockchip_mpp)
 
@@ -13,6 +14,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${MPP_INCLUDE_DIRS}
         ${LIBDRM_INCLUDE_DIRS}
+        ${LIBRGA_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/librtp/include
 )
 
