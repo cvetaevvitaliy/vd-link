@@ -1,0 +1,9 @@
+build/
+cmake-build*/
+.idea/
+.vscode/
+assets/build_datestamp
+__pycache__/
+log.csv
+*.flp
+.vscode-ctags
