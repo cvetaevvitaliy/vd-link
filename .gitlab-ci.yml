@@ -17,6 +17,5 @@ build-job:       # This job runs in the build stage.
 
   artifacts:
     paths:
-      - artifacts/bin/*
-      - build/*
+      - artifacts/*
     expire_in: 2 week
