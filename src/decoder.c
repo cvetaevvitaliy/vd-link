@@ -41,6 +41,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <drm/drm_fourcc.h>
+#include <linux/dma-buf.h>
 #include "src/drm_display.h"
 
 #define DECODER_DEBUG 0
@@ -150,7 +151,7 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
     video_frame_info.hor_stride = align16(w);
     video_frame_info.ver_stride = align16(h);
     video_frame_info.size = 0;
-    int num_buffers = 4; // Default: enough for 8-bit, 720p
+    int num_buffers = 8;
 
     switch (format) {
     case MPP_FMT_YUV420SP:
@@ -162,17 +163,14 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
     case MPP_FMT_YUV422P:
         // YUV422: 2 bytes per pixel
         video_frame_info.size = video_frame_info.hor_stride * video_frame_info.ver_stride * 2;
-        num_buffers = 6;
         break;
     case MPP_FMT_YUV420SP_10BIT:
         // YUV420 10bit: up to 2 bytes per pixel (depends on packing)
         video_frame_info.size = video_frame_info.hor_stride * video_frame_info.ver_stride * 2;
-        num_buffers = 6;
         break;
     case MPP_FMT_YUV422SP_10BIT:
         // YUV422 10bit: 4 bytes per pixel
         video_frame_info.size = video_frame_info.hor_stride * video_frame_info.ver_stride * 4;
-        num_buffers = 8;
         break;
     default:
         printf("[ DECODER ] Unsupported format: %d\n", format);
@@ -245,6 +243,7 @@ static void* decoder_thread_func(void* arg)
 {
     printf("[ DECODER ] Decoder thread started\n");
     (void)arg;
+    int first_frames = 0;
 
      while (atomic_load(&decoder_running)) {
         MppFrame frame = NULL;
@@ -261,20 +260,33 @@ static void* decoder_thread_func(void* arg)
                 //decoder_buff_init_internal(width, height, fmt); // If you want to use internal buffers (ION/Normal type)
                 // For DMA-HEAP buffers
                 decoder_buff_init_dma_heap(width, height, fmt);
+                mpp_frame_deinit(&frame);
 
             } else if (mpp_frame_get_eos(frame)) {
                 // End-of-stream received: stop decoding loop
                 printf("[ DECODER ] EOS\n");
                 atomic_store(&decoder_running, 0);
+                mpp_frame_deinit(&frame);
             } else {
+                // Skip first few frames to allow decoder to stabilize buffer pool
+                if (first_frames < 6) {
+                    first_frames++;
+                    usleep(50000);
+                    mpp_frame_deinit(&frame);
+                    continue;
+                }
                 // Frame is ready for rendering, DRM, or further processing
-                int width = mpp_frame_get_width(frame);
-                int height = mpp_frame_get_height(frame);
+                int width = (int)mpp_frame_get_width(frame);
+                int height = (int)mpp_frame_get_height(frame);
                 int dma_fd = mpp_buffer_get_fd(mpp_frame_get_buffer(frame));
+                struct dma_buf_sync sync;
+                sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE;
+                ioctl(dma_fd, DMA_BUF_IOCTL_SYNC, &sync);
 #if DECODER_DEBUG
                 printf("[ DECODER ] Frame ready: %dx%d, dma_fd=%d\n", width, height, dma_fd);
 #endif
-                drm_nv12_frame_flush(dma_fd, width, height);
+                drm_push_new_video_frame(dma_fd, width, height);
+                mpp_frame_deinit(&frame);
 
                 // FPS calculation block
                 static uint64_t last_fps_time = 0;
@@ -295,8 +307,6 @@ static void* decoder_thread_func(void* arg)
                     last_fps_time = now;
                 }
             }
-            // Release the frame
-            mpp_frame_deinit(&frame);
         } else {
             // No frame available, sleep briefly to avoid busy loop
             usleep(1000);
@@ -352,17 +362,10 @@ int decoder_start(struct config_t *cfg)
     }
 
     RK_U32 need_split = 1;
-    ret = mpp_dec_cfg_set_u32(cfg, "base:split_parse", need_split);
+    ret = mpp_dec_cfg_set_u32(mpp_cfg, "base:split_parse", need_split);
+    ret |= mpp_dec_cfg_set_u32(mpp_cfg, "base:fast_parse", 1);
     if (ret) {
         printf("[ DECODER ] mpp_dec_cfg_set_u32 failed: %d\n", ret);
-        mpp_dec_cfg_deinit(mpp_cfg);
-        mpp_destroy(ctx);
-        return -1;
-    }
-
-    ret = mpi->control(ctx, MPP_DEC_SET_CFG, mpp_cfg);
-    if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_CFG failed: %d\n", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -413,6 +416,29 @@ int decoder_start(struct config_t *cfg)
         return -1;
     }
 
+    /*
+     * timeout setup, refer to  MPP_TIMEOUT_XXX
+     * zero     - non block
+     * negative - block with no timeout
+     * positive - timeout in milisecond
+     */
+    RK_S64 block = 10; // 10 ms timeout for input/output operations for catch signals
+    ret = mpi->control(ctx, MPP_SET_INPUT_TIMEOUT, &block);
+    if (ret) {
+        printf("[ DECODER ] MPP_SET_INPUT_TIMEOUT failed: %d\n", ret);
+        mpp_dec_cfg_deinit(mpp_cfg);
+        mpp_destroy(ctx);
+        return -1;
+    }
+
+    ret = mpi->control(ctx, MPP_SET_OUTPUT_TIMEOUT, &block);
+    if (ret) {
+        printf("[ DECODER ] MPP_SET_OUTPUT_BLOCK failed: %d\n", ret);
+        mpp_dec_cfg_deinit(mpp_cfg);
+        mpp_destroy(ctx);
+        return -1;
+    }
+
     printf("[ DECODER ] Decoder initialized with all parameters: split: %d"
            " disable_error: %d"
            " immediate_out: %d"
@@ -455,10 +481,10 @@ int decoder_put_frame(struct config_t *cfg, void *data, int size)
     mpp_packet_set_pos(packet, data);
     mpp_packet_set_length(packet, size);
     mpp_packet_set_pts(packet,(RK_S64) get_time_ms());
-    mpi->decode_put_packet(ctx, packet);
 
     uint64_t data_feed_begin = get_time_ms();
     while (MPP_OK != (ret = mpi->decode_put_packet(ctx, packet))) {
+        printf("[ DECODER ] decode_put_packet returned %d, retrying...\n", ret);
         uint64_t elapsed = get_time_ms() - data_feed_begin;
         if (elapsed > 100) {
             decoder_stalled_count++;

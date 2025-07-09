@@ -63,7 +63,6 @@ struct drm_context_t {
     drmModeConnector *connector;
     drmModeCrtc *crtc;
     int drm_fd;
-    int drm_flags;
 
     // OSD planes
     int argb888_plane_id;
@@ -75,9 +74,6 @@ struct drm_context_t {
 
     // Rotation: 0, 90, 180, 270 (degrees)
     int rotate;
-    int rotate_dma_fd;
-    size_t rotate_buf_size;
-    int rotate_buf_w, rotate_buf_h;
 };
 
 struct drm_fb_t {
@@ -94,9 +90,11 @@ int drm_init(char *device, struct config_t *cfg);
 
 struct drm_context_t *drm_get_ctx(void);
 
-int drm_osd_buffer_flush(struct drm_context_t *ctx, struct drm_fb_t *osd_fb);
+void drm_push_new_video_frame(int dma_fd, int width, int height);
 
-int drm_nv12_frame_flush(int dma_fd, int width, int height);
+void drm_push_new_osd_frame(void);
+
+void *drm_get_next_osd_fb(void);
 
 void drm_close(void);
 

@@ -1,6 +1,6 @@
 /**
- * @file common.h this is part of project 'vd-link'
- *  Copyright © vitalii.nimych@gmail.com 2025
+ * @file msp-osd.h this is part of project 'vd-link'
+ * Copyright © vitalii.nimych@gmail.com 2025
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -21,26 +21,15 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  *
- * Created vitalii.nimych@gmail.com 30-06-2025
+ * Created vitalii.nimych@gmail.com 06-07-2025
  */
 
-#ifndef VRX_COMMON_H
-#define VRX_COMMON_H
-#include <stdint.h>
-#include <stdbool.h>
+#ifndef VD_LINK_MSP_OSD_H
+#define VD_LINK_MSP_OSD_H
+#include "common.h"
 
-typedef enum {
-    CODEC_UNKNOWN = 0,
-    CODEC_H264,
-    CODEC_H265
-} codec_type_t;
+int msp_osd_init(struct config_t *cfg);
 
-struct config_t {
-    const char* ip;
-    int port;
-    int pt;
-    codec_type_t codec;
-} ;
+void msp_osd_stop(void);
 
-
-#endif //VRX_COMMON_H
+#endif //VD_LINK_MSP_OSD_H

@@ -35,6 +35,7 @@
 #include "src/rtp_receiver.h"
 #include "src/common.h"
 #include "src/drm_display.h"
+#include "msp-osd.h"
 
 static volatile int running = 1;
 
@@ -42,6 +43,9 @@ static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
     running = 0;
+    msp_osd_stop();
+    rtp_receiver_stop();
+    drm_close();
 }
 
 static void setup_signals(void)
@@ -84,7 +88,6 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     static struct option long_options[] = {
             {"ip", required_argument, 0, 'i'},
             {"port", required_argument, 0, 'p'},
-            {"vsync", no_argument, 0, 'v'},
             {"help", no_argument, 0, 'h'},
             {0, 0, 0, 0}
     };
@@ -103,9 +106,6 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
             }
             config->port = port;
         } break;
-        case 'v':
-            config->vsync = true;
-            break;
         case 'h':
         default:
             print_usage(argv[0]);
@@ -121,7 +121,6 @@ int main(int argc, char* argv[])
         .port = 5602,
         .pt = 0,
         .codec = CODEC_UNKNOWN,
-        .vsync = false,
     };
 
     print_banner();
@@ -131,14 +130,13 @@ int main(int argc, char* argv[])
 
     drm_init("/dev/dri/card0", &config);
 
+    msp_osd_init(&config);
+
     rtp_receiver_start(&config);
 
     while (running) {
-        sleep(1);
+        usleep(100000); // Sleep for 100 ms
     }
-
-    rtp_receiver_stop();
-    drm_close();
 
     return 0;
 }

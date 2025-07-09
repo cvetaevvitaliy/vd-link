@@ -134,15 +134,6 @@ static int main_rtp_cb(void* param, const void* packet, int bytes, uint32_t time
 
     decoder_put_frame(cfg, (void*)packet, bytes);
 
-    //    if (bytes > 4) {
-    //        printf("NAL prefix: %02x %02x %02x %02x, NAL type: %02x\n",
-    //               ((const uint8_t*)packet)[0],
-    //               ((const uint8_t*)packet)[1],
-    //               ((const uint8_t*)packet)[2],
-    //               ((const uint8_t*)packet)[3],
-    //               ((const uint8_t*)packet)[4]);
-    //    }
-
     return 0;
 }
 
@@ -234,7 +225,7 @@ static void* rtp_receiver_thread(void *arg)
 
     // Create main demuxer for packet processing
     demuxer = rtp_demuxer_create(
-            10, 90000, ctx->pt,
+            0, 90000, ctx->pt,
             codec_name,
             main_rtp_cb, ctx
     );
