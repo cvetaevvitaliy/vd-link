@@ -46,6 +46,8 @@
 #include <rga/rga.h>
 #include <linux/dma-heap.h>
 #include <dirent.h>
+#include <stdatomic.h>
+#include <linux/dma-buf.h>
 
 #define DRM_DEBUG 0
 
@@ -57,11 +59,79 @@ static struct drm_context_t drm_context = {
         .argb888_plane_id = -1,
         .osd_plane_props = {0},
         .video_plane_props = {0},
-        .drm_flags = DRM_MODE_ATOMIC_NONBLOCK,
 };
+
+struct drm_fb_cleanup {
+    int drm_fd;
+    struct drm_context_t *ctx;
+    uint32_t fb_osd_id;
+    uint32_t fb_video_id;
+    int rotate_idx;
+};
+
+static struct drm_fb_cleanup cleanup;
+
+static drmEventContext evctx = {
+    .version = DRM_EVENT_CONTEXT_VERSION,
+    .vblank_handler = NULL,
+    .page_flip_handler = NULL, // used drm_page_flip_handler
+    .page_flip_handler2 = NULL,
+    .sequence_handler = NULL
+};
+
+//static pthread_mutex_t drm_mutex = PTHREAD_MUTEX_INITIALIZER;
+static atomic_int running = 0;
+static pthread_t drm_thread;
+static atomic_int pending_commit = 0;
+
+#define OSD_BUF_COUNT 2
+#define MAX_VIDEO_BUFS 16
+#define ROTATE_BUF_COUNT (MAX_VIDEO_BUFS)
+
+struct drm_fb_t osd_bufs[OSD_BUF_COUNT];
+
+struct {
+    int dirty[OSD_BUF_COUNT];
+    int osd_width;
+    int osd_height;
+    int cur;
+    int next;
+} osd_db = { {0,0}, 0, 1 };
+
+#define ROTATE_OSD_BUF_COUNT OSD_BUF_COUNT
+
+struct rotate_osd_pool_t {
+    int w, h;
+    int dma_fd[ROTATE_OSD_BUF_COUNT];
+    uint32_t fb_id[ROTATE_OSD_BUF_COUNT];
+    int count;
+} rotate_osd_pool = {0};
+
+struct {
+    int dma_fd[MAX_VIDEO_BUFS];
+    uint32_t fb_id[MAX_VIDEO_BUFS];
+    int video_width;
+    int video_height;
+    int dirty[MAX_VIDEO_BUFS];
+    int count;
+    int cur;
+} video_buf_map = { .count = 0, .cur = 0 };
+
+struct rotate_video_pool_t {
+    int w, h;
+    int dma_fd[ROTATE_BUF_COUNT];
+    uint32_t fb_id[ROTATE_BUF_COUNT];
+    int count;
+} rotate_video_pool = {0};
+
 
 static int drm_get_prop_id(int fd, uint32_t obj_id, uint32_t obj_type, const char *name);
 static int64_t drm_get_prop_value(int fd, uint32_t obj_id, uint32_t obj_type, const char *name);
+static void* compositor_thread(void* arg);
+static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data);
+static void drm_init_event_context(void);
+static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
+static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
 
 static void drm_print_modes(struct drm_context_t *drm_ctx)
 {
@@ -373,66 +443,6 @@ static void drm_fill_plane_props(int drm_fd, uint32_t plane_id, struct drm_plane
     props->zpos_value = drm_get_prop_value(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE, "zpos");
 }
 
-static int drm_atomic_commit_osd(struct drm_context_t *ctx, struct drm_fb_t *osd_fb, int width, int height)
-{
-    struct drm_plane_props *p = &ctx->osd_plane_props;
-    drmModeAtomicReq *req = drmModeAtomicAlloc();
-
-    // Calculate aspect-ratio-preserving scaling and centering for OSD
-    int screen_w = ctx->display_info.hdisplay;
-    int screen_h = ctx->display_info.vdisplay;
-    float ar_src = (float)width / height;
-    float ar_dst = (float)screen_w / screen_h;
-    int crtc_w, crtc_h, crtc_x, crtc_y;
-
-    if (ar_dst > ar_src) {
-        // Display is wider than image: pad left/right
-        crtc_h = screen_h;
-        crtc_w = (int)(screen_h * ar_src);
-        crtc_x = (screen_w - crtc_w) / 2;
-        crtc_y = 0;
-    } else {
-        // Display is taller than image: pad top/bottom
-        crtc_w = screen_w;
-        crtc_h = (int)(screen_w / ar_src);
-        crtc_x = 0;
-        crtc_y = (screen_h - crtc_h) / 2;
-    }
-
-    // Set connector property: CRTC_ID
-    if (p->connector_crtc_id > 0)
-        drmModeAtomicAddProperty(req, ctx->connector->connector_id, p->connector_crtc_id, ctx->crtc->crtc_id);
-
-    // Set CRTC properties: MODE_ID, ACTIVE
-    if (p->mode_id > 0)
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, p->mode_id, p->mode_blob_id);
-    if (p->active > 0)
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, p->active, 1);
-
-    // Set plane properties (source area always whole image)
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->fb_id,   osd_fb->fb_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_id, ctx->crtc->crtc_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_x,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_y,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_w,   width << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_h,   height << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_x,  crtc_x);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_y,  crtc_y);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_w,  crtc_w);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_h,  crtc_h);
-
-    // Set Z-position if available
-    if (p->zpos > 0)
-        drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->zpos, p->zpos_value);
-
-    int ret = drmModeAtomicCommit(ctx->drm_fd, req, ctx->drm_flags, NULL);
-    if (ret < 0) {
-        fprintf(stderr, "[ DRM ] Atomic commit failed for OSD plane %d: %s\n", ctx->argb888_plane_id, strerror(errno));
-    }
-    drmModeAtomicFree(req);
-    return ret;
-}
-
 static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width, int height)
 {
 #if DRM_DEBUG
@@ -476,83 +486,167 @@ static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width,
     return fb2.fb_id;
 }
 
-static int drm_atomic_commit_video(struct drm_context_t *ctx, int width, int height, uint32_t fb)
+static int drm_prepare_argb8888_fb(struct drm_context_t *ctx, int dma_fd, int width, int height)
 {
+    struct drm_prime_handle prime = {
+        .fd = dma_fd,
+        .flags = 0,
+        .handle = 0,
+    };
+    if (ioctl(ctx->drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) < 0) {
+        perror("[ DRM ] DRM_IOCTL_PRIME_FD_TO_HANDLE (ARGB8888)");
+        return -1;
+    }
+
+    struct drm_mode_fb_cmd2 fb2 = {
+        .width  = width,
+        .height = height,
+        .pixel_format = DRM_FORMAT_ARGB8888,
+        .handles = { prime.handle },
+        .pitches = { width * 4 },
+        .offsets = { 0 },
+    };
+    if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2) < 0) {
+        perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2 (ARGB8888)");
+        return -1;
+    }
+    return fb2.fb_id;
+}
+
+int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *osd_fb, int osd_width, int osd_height,
+                                  uint32_t video_fb_id, int dma_fd, int video_width, int video_height)
+{
+    if (ctx->argb888_plane_id < 0 && ctx->nv12_plane_id < 0) {
+        fprintf(stderr, "[ DRM ] No planes available for atomic commit!\n");
+        return -1;
+    }
+
 #if DRM_DEBUG
-    printf("[ DRM ] drm_fd=%d Committing video plane %d with FB %d, size %dx%d\n", ctx->drm_fd, ctx->nv12_plane_id, fb, width, height);
+    printf("[ DRM ] drm_fd=%d Committing video plane %d with FB %d, dma_fd %d size %dx%d, osd plane %d with FB %d, size %dx%d,\n", ctx->drm_fd, ctx->nv12_plane_id, video_fb_id, dma_fd,
+           video_width, video_height, ctx->argb888_plane_id, osd_fb->fb_id, osd_width, osd_height);
 #endif
-    static uint32_t prev_fb_id = 0;
 
-    struct drm_plane_props *p = &ctx->video_plane_props;
     drmModeAtomicReq *req = drmModeAtomicAlloc();
+    if (!req) {
+        fprintf(stderr, "[ DRM ] Failed to allocate atomic request\n");
+        return -1;
+    }
 
-    if (!ctx || !ctx->connector || !ctx->crtc || !p) {
+    struct drm_plane_props *video_plane_props = &ctx->video_plane_props;
+    struct drm_plane_props *osd_plane_props = &ctx->osd_plane_props;
+
+    if (!ctx || !ctx->connector || !ctx->crtc || !video_plane_props) {
         fprintf(stderr, "NULL pointer in DRM context!\n");
+        drmModeAtomicFree(req);
         return -1;
     }
 
     // Calculate the output area with aspect ratio preservation (letterbox/pillarbox)
-    uint32_t crtcw = ctx->display_info.hdisplay;
-    uint32_t crtch = ctx->display_info.vdisplay;
-    float video_ratio = (float)width / (float)height;
+    uint32_t crtc_video_w = ctx->display_info.hdisplay;
+    uint32_t crtc_video_h = ctx->display_info.vdisplay;
+    float video_ratio = (float)video_width / (float)video_height;
 
     // Choose the largest area that fits while preserving aspect ratio
-    if ((float)crtcw / video_ratio > (float)crtch) {
+    if ((float)crtc_video_w / video_ratio > (float)crtc_video_h) {
         // Black bars on the sides (pillarbox)
-        crtcw = crtch * video_ratio;
-        // crtch remains unchanged
+        crtc_video_w = crtc_video_h * video_ratio;
+        // crtc_video_h remains unchanged
     } else {
         // Black bars on top/bottom (letterbox)
-        // crtcw remains unchanged
-        crtch = crtcw / video_ratio;
+        // crtc_video_w remains unchanged
+        crtc_video_h = crtc_video_w / video_ratio;
     }
     // Center the video on the screen
-    int crtcx = (int)(ctx->display_info.hdisplay - crtcw) / 2;
-    int crtcy = (int)(ctx->display_info.vdisplay - crtch) / 2;
+    int crtc_video_x = (int)(ctx->display_info.hdisplay - crtc_video_w) / 2;
+    int crtc_video_y = (int)(ctx->display_info.vdisplay - crtc_video_h) / 2;
+
+    // Calculate aspect-ratio-preserving scaling and centering for OSD
+    uint32_t screen_w = ctx->display_info.hdisplay;
+    uint32_t screen_h = ctx->display_info.vdisplay;
+    float ar_src = (float)osd_width / osd_height;
+    float ar_dst = (float)screen_w / screen_h;
+    uint32_t crtc_osd_w, crtc_osd_h, crtc_osd_x, crtc_osd_y;
+
+    if (ar_dst > ar_src) {
+        // Display is wider than image: pad left/right
+        crtc_osd_h = screen_h;
+        crtc_osd_w = (int)(screen_h * ar_src);
+        crtc_osd_x = (screen_w - crtc_osd_w) / 2;
+        crtc_osd_y = 0;
+    } else {
+        // Display is taller than image: pad top/bottom
+        crtc_osd_w = screen_w;
+        crtc_osd_h = (int)(screen_w / ar_src);
+        crtc_osd_x = 0;
+        crtc_osd_y = (screen_h - crtc_osd_h) / 2;
+    }
 
     // Set connector property CRTC_ID if present
-    if (p->connector_crtc_id > 0)
-        drmModeAtomicAddProperty(req, ctx->connector->connector_id, p->connector_crtc_id, ctx->crtc->crtc_id);
+    if (video_plane_props->connector_crtc_id > 0) {
+        drmModeAtomicAddProperty(req, ctx->connector->connector_id, video_plane_props->connector_crtc_id,ctx->crtc->crtc_id);
+        drmModeAtomicAddProperty(req, ctx->connector->connector_id, osd_plane_props->connector_crtc_id,ctx->crtc->crtc_id);
+    }
 
     // Set CRTC properties if present (MODE_ID and ACTIVE)
-    if (p->mode_id > 0)
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, p->mode_id, p->mode_blob_id);
-    if (p->active > 0)
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, p->active, 1);
+    if (video_plane_props->mode_id > 0) {
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, video_plane_props->mode_id, video_plane_props->mode_blob_id);
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, osd_plane_props->mode_id, osd_plane_props->mode_blob_id);
+    }
+    if (video_plane_props->active > 0) {
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, video_plane_props->active, 1);
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, osd_plane_props->active, 1);
+    }
 
-    // Set video plane properties
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->crtc_id, ctx->crtc->crtc_id);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->fb_id,   fb);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->src_x,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->src_y,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->src_w,   width << 16);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->src_h,   height << 16);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->crtc_x,  crtcx);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->crtc_y,  crtcy);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->crtc_w,  crtcw);
-    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->crtc_h,  crtch);
+    // Set video plane & OSD plane properties
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_id, ctx->crtc->crtc_id);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_id, ctx->crtc->crtc_id);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->fb_id,   video_fb_id);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->fb_id,   osd_fb->fb_id);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_x,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_x,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_y,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_y,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_w,   video_width << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_w,   osd_width << 16);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_h,   video_height << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_h,   osd_height << 16);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_x, crtc_video_x);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_x, crtc_osd_x);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_y, crtc_video_y);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_y, crtc_osd_y);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_w, crtc_video_w);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_w, crtc_osd_w);
+    drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_h, crtc_video_h);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_h, crtc_osd_h);
 
     // Set Z-position if property is available
-    if (p->zpos > 0)
-        drmModeAtomicAddProperty(req, ctx->nv12_plane_id, p->zpos, p->zpos_value);
-
-    // Perform the atomic commit
-    int ret = drmModeAtomicCommit(ctx->drm_fd, req, ctx->drm_flags, NULL);
-    if (ret < 0) {
-        ioctl(ctx->drm_fd, DRM_IOCTL_MODE_RMFB, &fb);
-        drmModeAtomicFree(req);
-        return ret;
+    if (video_plane_props->zpos > 0) {
+        drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->zpos, 0);
+        drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->zpos, 1);
     }
 
-    if (prev_fb_id && prev_fb_id != fb) {
-        if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_RMFB, &prev_fb_id) < 0) {
-            perror("[ DRM ] Failed to remove previous video FB");
-        }
+
+    cleanup.drm_fd = ctx->drm_fd;
+    cleanup.fb_video_id = video_fb_id;
+    cleanup.fb_osd_id = osd_fb->fb_id;
+    cleanup.ctx = ctx;
+
+    if (drmModeAtomicCommit(ctx->drm_fd, req, DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT, &cleanup) < 0) {
+        fprintf(stderr, "[ DRM ] Atomic commit failed for all planes %s\n", strerror(errno));
+        atomic_store(&pending_commit, 1);
+        return -1;
     }
-    prev_fb_id = fb;
+
+#if DRM_DEBUG
+    printf("[ DRM ] Atomic commit completed: video plane %d with FB %d, size %dx%d, osd plane %d with FB %d, size %dx%d\n",
+           ctx->nv12_plane_id, video_fb_id, video_width, video_height,
+           ctx->argb888_plane_id, osd_fb->fb_id, osd_width, osd_height);
+#endif
 
     drmModeAtomicFree(req);
-    return ret;
+
+    return 0;
+
 }
 
 static void fill_rainbow_argb8888(struct drm_fb_t *fb, int width, int height)
@@ -706,92 +800,6 @@ static int alloc_nv12_dmabuf_from_ram(void *nv12_ptr, int width, int height)
     return dma_fd;
 }
 
-static int test_drm_output(struct drm_context_t *ctx)
-{
-    if (!ctx || ctx->drm_fd < 0) {
-        fprintf(stderr, "[ DRM ] Invalid DRM context\n");
-        return -EINVAL;
-    }
-
-    int ret = 0;
-    int width = ctx->display_info.hdisplay;
-    int height = ctx->display_info.vdisplay;
-    struct drm_fb_t osd_frame_buffer = {0};
-
-    drm_create_dumb_argb8888_fb(ctx, width, height, &osd_frame_buffer);
-    if (osd_frame_buffer.buff_addr == MAP_FAILED) {
-        fprintf(stderr, "[ DRM ] Failed to create ARGB8888 framebuffer: %s\n", strerror(errno));
-        return -1;
-    }
-
-    // Fill the OSD framebuffer with a rainbow pattern
-    //fill_rainbow_argb8888(&osd_frame_buffer, width, height);
-    printf("[ DRM TEST ] Filled OSD framebuffer with rainbow pattern\n");
-
-    ret = drm_atomic_commit_osd(ctx, &osd_frame_buffer, width, height);
-    if (ret < 0) {
-        fprintf(stderr, "[ DRM ] Failed to commit OSD framebuffer: %s\n", strerror(errno));
-        munmap(osd_frame_buffer.buff_addr, osd_frame_buffer.size);
-        return ret;
-    }
-    printf("[ DRM TEST ] OSD framebuffer committed successfully\n");
-
-    void *src_nv12 = malloc(width * height * 3 / 2);
-    if (src_nv12 == NULL) {
-        fprintf(stderr, "[ DRM ] Failed to allocate memory for NV12 buffer\n");
-        return -ENOMEM;
-    }
-
-    fill_rainbow_checker_nv12(src_nv12, width, height);
-    printf("[ DRM TEST ] Filled NV12 buffer with rainbow checker pattern\n");
-
-    int nv12_dmabuf_fd = alloc_nv12_dmabuf_from_ram(src_nv12, width, height);
-    if (nv12_dmabuf_fd < 0) {
-        fprintf(stderr, "[ DRM ] Failed to allocate NV12 dmabuf from RAM\n");
-        free(src_nv12);
-        return -1;
-    }
-    free(src_nv12);
-
-    printf("[ DRM TEST ] Allocated NV12 dmabuf fd: %d\n", nv12_dmabuf_fd);
-
-    struct drm_prime_handle prime = {
-            .fd = nv12_dmabuf_fd,
-            .flags = 0,
-            .handle = 0,
-    };
-    ioctl(ctx->drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime);
-
-    struct drm_mode_fb_cmd2 fb2 = {
-            .width  = width,
-            .height = height,
-            .pixel_format = DRM_FORMAT_NV12,
-            .handles = { prime.handle, prime.handle },
-            .pitches = { width, width },
-            .offsets = { 0, width * height },
-    };
-    ret = ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2);
-    if (ret < 0) {
-        perror("DRM_IOCTL_MODE_ADDFB2");
-        printf("  handle0=%u handle1=%u pitch0=%u pitch1=%u\n",
-               prime.handle, prime.handle, width, width);
-        printf("  fd=%d\n", nv12_dmabuf_fd);
-        close(nv12_dmabuf_fd);
-    }
-    printf("[ DRM TEST ] Created framebuffer: fb_id=%u\n", fb2.fb_id);
-
-    ret = drm_atomic_commit_video(ctx, width, height, fb2.fb_id);
-    if (ret < 0) {
-        fprintf(stderr, "[ DRM ] Failed to commit video framebuffer: %s\n", strerror(errno));
-        munmap(osd_frame_buffer.buff_addr, osd_frame_buffer.size);
-        close(nv12_dmabuf_fd);
-        return ret;
-    }
-    printf("[ DRM TEST ] Video framebuffer committed successfully\n");
-
-    return 0;
-}
-
 static int find_rotation_in_dt(const char *base)
 {
     DIR *dir = opendir(base);
@@ -886,6 +894,84 @@ static int drm_activate_crtc(struct drm_context_t *ctx)
     return ret;
 }
 
+void drm_disable_unused_planes(int drm_fd, uint32_t crtc_id, uint32_t plane_video_id, uint32_t plane_osd_id)
+{
+    drmModePlaneRes* plane_res = drmModeGetPlaneResources(drm_fd);
+    if (!plane_res)
+        return;
+
+    for (uint32_t i = 0; i < plane_res->count_planes; i++) {
+        uint32_t plane_id = plane_res->planes[i];
+
+        // Skip video and OSD planes
+        if (plane_id == plane_video_id || plane_id == plane_osd_id)
+            continue;
+
+        drmModePlane* plane = drmModeGetPlane(drm_fd, plane_id);
+        if (!plane)
+            continue;
+
+        // Find CRTC index (possible_crtcs is a bitmap of indexes, not IDs)
+        int crtc_index = -1;
+        drmModeRes* res = drmModeGetResources(drm_fd);
+        for (int c = 0; c < res->count_crtcs; ++c)
+            if (res->crtcs[c] == crtc_id)
+                crtc_index = c;
+        drmModeFreeResources(res);
+        if (crtc_index < 0) {
+            drmModeFreePlane(plane);
+            continue;
+        }
+
+        // Check if this plane can be assigned to our CRTC
+        if (!(plane->possible_crtcs & (1 << crtc_index))) {
+            drmModeFreePlane(plane);
+            continue;
+        }
+
+        // Only disable if plane is active (has FB assigned)
+        if (plane->fb_id == 0) {
+            drmModeFreePlane(plane);
+            continue;
+        }
+
+        drmModeAtomicReq* req = drmModeAtomicAlloc();
+        if (!req) {
+            drmModeFreePlane(plane);
+            continue;
+        }
+
+        drmModeObjectProperties* props = drmModeObjectGetProperties(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE);
+        if (!props) {
+            drmModeAtomicFree(req);
+            drmModeFreePlane(plane);
+            continue;
+        }
+        uint32_t prop_fb_id = 0;
+        for (uint32_t j = 0; j < props->count_props; j++) {
+            drmModePropertyRes* prop = drmModeGetProperty(drm_fd, props->props[j]);
+            if (!strcmp(prop->name, "FB_ID"))
+                prop_fb_id = prop->prop_id;
+            drmModeFreeProperty(prop);
+        }
+
+        // Only set FB_ID=0 to disable plane
+        if (prop_fb_id) {
+            drmModeAtomicAddProperty(req, plane_id, prop_fb_id, 0);
+
+            int ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+            if (ret) {
+                fprintf(stderr, "[ DRM ] Could not disable plane %u: %s\n", plane_id, strerror(errno));
+            }
+        }
+
+        drmModeAtomicFree(req);
+        drmModeFreeObjectProperties(props);
+        drmModeFreePlane(plane);
+    }
+    drmModeFreePlaneResources(plane_res);
+}
+
 int drm_init(char *device, struct config_t *cfg)
 {
     int ret = 0;
@@ -894,14 +980,6 @@ int drm_init(char *device, struct config_t *cfg)
     if (!device || strlen(device) == 0 || !cfg) {
         fprintf(stderr, "[ DRM ] No device specified\n");
         return -EINVAL;
-    }
-
-    if (cfg->vsync == true) {
-        drm_context.drm_flags = DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_PAGE_FLIP_EVENT;
-        printf("[ DRM ] Using vsync mode for atomic commits\n");
-    } else {
-        drm_context.drm_flags = DRM_MODE_ATOMIC_NONBLOCK;
-        printf("[ DRM ] Using non-vsync mode for atomic commits\n");
     }
 
     drm_context.drm_fd = open(device, O_RDWR | O_CLOEXEC);
@@ -976,18 +1054,510 @@ int drm_init(char *device, struct config_t *cfg)
 
     printf("[ DRM ] Found NV12 plane ID: %d for video, ARGB8888 plane ID: %d for OSD\n", drm_context.nv12_plane_id, drm_context.argb888_plane_id);
 
+    drm_disable_unused_planes(drm_context.drm_fd, drm_context.crtc->crtc_id, drm_context.nv12_plane_id, drm_context.argb888_plane_id);
+
     drm_context.rotate = find_rotation_in_dt("/proc/device-tree");
     if (drm_context.rotate == -1) {
         printf("[ DRM ] Rotation not found in device-tree, fallback to 0\n");
         drm_context.rotate = 0;
     }
     printf("[ DRM ] Detected rotation: %d degrees\n", drm_context.rotate);
+    //drm_context.rotate = 0; // Force set no rotation for testing
 
-#if 1
-    test_drm_output(&drm_context);
+    int expected = 0;
+    if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
+        printf("[ DRM ] Already running thread\n");
+        return -1;
+    }
+    ret = pthread_create(&drm_thread, NULL, compositor_thread, &drm_context);
+
+    return ret;
+}
+
+static int test_draw_all_plane(struct drm_context_t *ctx)
+{
+    int ret = 0;
+    int width = ctx->display_info.hdisplay;
+    int height = ctx->display_info.vdisplay;
+    struct drm_fb_t osd_frame_buffer = {0};
+
+    drm_create_dumb_argb8888_fb(ctx, width, height, &osd_frame_buffer);
+    if (osd_frame_buffer.buff_addr == MAP_FAILED) {
+        fprintf(stderr, "[ DRM ] Failed to create ARGB8888 framebuffer: %s\n", strerror(errno));
+        return -1;
+    }
+    printf("[ DRM TEST ] Created OSD framebuffer: fb_id=%u, size=%zu\n", osd_frame_buffer.fb_id, osd_frame_buffer.size);
+
+    // Fill the OSD framebuffer with a rainbow pattern
+    fill_rainbow_argb8888(&osd_frame_buffer, width, height);
+
+    void *src_nv12 = malloc(width * height * 3 / 2);
+    if (src_nv12 == NULL) {
+        fprintf(stderr, "[ DRM ] Failed to allocate memory for NV12 buffer\n");
+        return -1;
+    }
+
+    fill_rainbow_checker_nv12(src_nv12, width, height);
+    printf("[ DRM TEST ] Filled NV12 buffer with rainbow checker pattern\n");
+
+    int nv12_dmabuf_fd = alloc_nv12_dmabuf_from_ram(src_nv12, width, height);
+    if (nv12_dmabuf_fd < 0) {
+        fprintf(stderr, "[ DRM ] Failed to allocate NV12 dmabuf from RAM\n");
+        free(src_nv12);
+        return -1;
+    }
+    free(src_nv12);
+
+    printf("[ DRM TEST ] Allocated NV12 dmabuf fd: %d\n", nv12_dmabuf_fd);
+
+    struct drm_prime_handle prime = {
+        .fd = nv12_dmabuf_fd,
+        .flags = 0,
+        .handle = 0,
+    };
+    ioctl(ctx->drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime);
+
+    struct drm_mode_fb_cmd2 fb2 = {
+        .width  = width,
+        .height = height,
+        .pixel_format = DRM_FORMAT_NV12,
+        .handles = { prime.handle, prime.handle },
+        .pitches = { width, width },
+        .offsets = { 0, width * height },
+    };
+    ret = ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2);
+    if (ret < 0) {
+        perror("DRM_IOCTL_MODE_ADDFB2");
+        printf("  handle0=%u handle1=%u pitch0=%u pitch1=%u\n",
+               prime.handle, prime.handle, width, width);
+        printf("  fd=%d\n", nv12_dmabuf_fd);
+        close(nv12_dmabuf_fd);
+    }
+    printf("[ DRM TEST ] Created framebuffer: fb_id=%u\n", fb2.fb_id);
+
+
+    ret = drm_atomic_commit_all_buffers(ctx, &osd_frame_buffer, width, height, fb2.fb_id, 0,
+                                        width, height);
+    if (ret < 0) {
+        fprintf(stderr, "[ DRM ] Failed to commit video framebuffer: %s\n", strerror(errno));
+    }
+
+    return ret;
+
+}
+
+static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data)
+{
+    if (!atomic_load(&running)) {
+        return;
+    }
+#if DRM_DEBUG
+    static uint64_t prev_sec = 0;
+    static uint64_t prev_usec = 0;
+
+    if (prev_sec != 0) {
+        double dt = (double)(sec - prev_sec) * 1000.0 + (double)(usec - prev_usec) / 1000.0;
+        printf("[ DRM ] Done! Frame flip! Δt=%.2f ms (%.2f FPS)\n", dt, 1000.0 / dt);
+    }
+    prev_sec = sec;
+    prev_usec = usec;
 #endif
 
-    return 0;
+    if (cleanup.drm_fd >= 0) {
+
+        if (osd_db.dirty[osd_db.next]) {
+            osd_db.cur ^= 1;
+            osd_db.next ^= 1;
+            osd_db.dirty[osd_db.cur] = 0;
+        }
+
+        if (video_buf_map.dirty[video_buf_map.cur]) {
+            video_buf_map.dirty[video_buf_map.cur] = 0;
+        }
+        int video_cur = video_buf_map.cur;
+
+        drm_atomic_commit_all_buffers(cleanup.ctx, &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                      video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
+                                      video_buf_map.video_width, video_buf_map.video_height);
+    }
+}
+
+static void drm_init_event_context(void)
+{
+    evctx.page_flip_handler = drm_page_flip_handler;
+}
+
+static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
+{
+    if (!ctx || ctx->drm_fd < 0) {
+        fprintf(stderr, "[ DRM ] Invalid DRM context\n");
+        return -EINVAL;
+    }
+
+    int ret = 0;
+    int width = ctx->display_info.hdisplay;
+    int height = ctx->display_info.vdisplay;
+
+    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
+        ret = drm_create_dumb_argb8888_fb(ctx, width, height, &osd_bufs[i]);
+        if (ret < 0) {
+            fprintf(stderr, "OSD dumb fb init failed for slot %d\n", i);
+        }
+        osd_db.dirty[i] = 0;
+    }
+    osd_db.osd_width = width;
+    osd_db.osd_height = height;
+    osd_db.cur = 0;
+    osd_db.next = 1;
+
+    printf("[ DRM ] OSD buffer pool created successfully\n");
+    return ret;
+
+}
+
+static void rotate_pool_cleanup(struct drm_context_t *ctx)
+{
+    printf("[ DRM ] Cleaning up rotate pool\n");
+    for (int i = 0; i < ROTATE_BUF_COUNT; ++i) {
+        if (rotate_video_pool.fb_id[i] > 0) {
+            if (ctx && ctx->drm_fd > 0) {
+                drmModeRmFB(ctx->drm_fd, rotate_video_pool.fb_id[i]);
+                printf("[ DRM ] Removed rotate pool FB %d\n", rotate_video_pool.fb_id[i]);
+            }
+            rotate_video_pool.fb_id[i] = 0;
+        }
+        if (rotate_video_pool.dma_fd[i] > 0) {
+            close(rotate_video_pool.dma_fd[i]);
+            printf("[ DRM ] Closed rotate pool DMA FD %d\n", rotate_video_pool.dma_fd[i]);
+            rotate_video_pool.dma_fd[i] = -1;
+        }
+    }
+    rotate_video_pool.w = 0;
+    rotate_video_pool.h = 0;
+}
+
+static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int height)
+{
+    if (rotate_video_pool.w == width && rotate_video_pool.h == height) return;
+    rotate_video_pool.w = width;
+    rotate_video_pool.h = height;
+    for (int i = 0; i < ROTATE_BUF_COUNT; ++i) {
+        if (rotate_video_pool.fb_id[i] > 0) {
+            drmModeRmFB(ctx->drm_fd, rotate_video_pool.fb_id[i]);
+            rotate_video_pool.fb_id[i] = 0;
+        }
+        if (rotate_video_pool.dma_fd[i] > 0) {
+            close(rotate_video_pool.dma_fd[i]);
+            rotate_video_pool.dma_fd[i] = -1;
+        }
+        rotate_video_pool.dma_fd[i] = alloc_dmabuf_fd(width * height * 3 / 2);
+        rotate_video_pool.fb_id[i] = drm_prepare_nv12_fb(ctx, rotate_video_pool.dma_fd[i], width, height);
+    }
+}
+
+static void rotate_osd_pool_cleanup(struct drm_context_t *ctx)
+{
+    printf("[ DRM ] Cleaning up rotate OSD pool\n");
+    for (int i = 0; i < ROTATE_OSD_BUF_COUNT; ++i) {
+        if (rotate_osd_pool.fb_id[i] > 0 && ctx->drm_fd > 0) {
+            drmModeRmFB(ctx->drm_fd, rotate_osd_pool.fb_id[i]);
+            printf("[ DRM ] Removed rotate OSD pool FB %d\n", rotate_osd_pool.fb_id[i]);
+            rotate_osd_pool.fb_id[i] = 0;
+        }
+        if (rotate_osd_pool.dma_fd[i] > 0) {
+            close(rotate_osd_pool.dma_fd[i]);
+            printf("[ DRM ] Closed rotate OSD pool DMA FD %d\n", rotate_osd_pool.dma_fd[i]);
+            rotate_osd_pool.dma_fd[i] = -1;
+        }
+    }
+    rotate_osd_pool.w = 0;
+    rotate_osd_pool.h = 0;
+}
+
+static void rotate_osd_pool_init(struct drm_context_t *ctx, int width, int height)
+{
+    printf("[ DRM ] Initializing rotate OSD pool with size %dx%d\n", width, height);
+    if (rotate_osd_pool.w == width && rotate_osd_pool.h == height)
+        return;
+    rotate_osd_pool.w = width;
+    rotate_osd_pool.h = height;
+
+    for (int i = 0; i < ROTATE_OSD_BUF_COUNT; ++i) {
+        if (rotate_osd_pool.fb_id[i] > 0) {
+            drmModeRmFB(ctx->drm_fd, rotate_osd_pool.fb_id[i]);
+            rotate_osd_pool.fb_id[i] = 0;
+        }
+        if (rotate_osd_pool.dma_fd[i] > 0) {
+            close(rotate_osd_pool.dma_fd[i]);
+            rotate_osd_pool.dma_fd[i] = -1;
+        }
+        size_t sz = width * height * 4;
+        rotate_osd_pool.dma_fd[i] = alloc_dmabuf_fd(sz);
+        rotate_osd_pool.fb_id[i] = drm_prepare_argb8888_fb(ctx, rotate_osd_pool.dma_fd[i], width, height);
+        if (rotate_osd_pool.fb_id[i] <= 0) {
+            printf("[ DRM ] ERROR: failed to create ARGB8888 FB for rotate_osd_pool[%d]\n", i);
+        } else {
+            printf("[ DRM ] Rotate OSD pool buffer %d ready: dma_fd=%d, fb_id=%d\n",
+                   i, rotate_osd_pool.dma_fd[i], rotate_osd_pool.fb_id[i]);
+        }
+    }
+}
+
+static void video_buf_map_cleanup(struct drm_context_t *ctx)
+{
+    printf("[ DRM ] Cleaning up video buffer map\n");
+    for (int i = 0; i < MAX_VIDEO_BUFS; ++i) {
+        if (video_buf_map.fb_id[i] > 0 && ctx->drm_fd > 0) {
+            drmModeRmFB(ctx->drm_fd, video_buf_map.fb_id[i]);
+            printf("[ DRM ] Removed video buffer FB %d\n", video_buf_map.fb_id[i]);
+            video_buf_map.fb_id[i] = 0;
+        }
+        if (video_buf_map.dma_fd[i] > 0) {
+            close(video_buf_map.dma_fd[i]);
+            printf("[ DRM ] Closed video buffer DMA FD %d\n", video_buf_map.dma_fd[i]);
+            video_buf_map.dma_fd[i] = -1;
+        }
+        video_buf_map.dirty[i] = 0;
+    }
+    video_buf_map.count = 0;
+    video_buf_map.cur = 0;
+}
+
+static void drm_cleanup_osd_buff_pool(struct drm_context_t *ctx)
+{
+    printf("[ DRM ] Cleaning up OSD buffer pool\n");
+    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
+        if (osd_bufs[i].fb_id > 0 && ctx->drm_fd > 0) {
+            drmModeRmFB(ctx->drm_fd, osd_bufs[i].fb_id);
+            printf("[ DRM ] Removed OSD buffer FB %d\n", osd_bufs[i].fb_id);
+            osd_bufs[i].fb_id = 0;
+        }
+        if (osd_bufs[i].buff_addr && osd_bufs[i].buff_addr != MAP_FAILED) {
+            munmap(osd_bufs[i].buff_addr, osd_bufs[i].size);
+            printf("[ DRM ] Unmapped OSD buffer %d\n", i);
+            osd_bufs[i].buff_addr = NULL;
+        }
+        osd_bufs[i].handles[0] = 0;
+        osd_bufs[i].pitches[0] = 0;
+        osd_bufs[i].size = 0;
+        osd_db.dirty[i] = 0;
+    }
+    osd_db.osd_width = 0;
+    osd_db.osd_height = 0;
+    osd_db.cur = 0;
+    osd_db.next = 1;
+}
+
+void drm_push_new_osd_frame(void)
+{
+    // TODO: need to add rotate OSD buffers
+    osd_db.dirty[osd_db.next] = 1;
+}
+
+void *drm_get_next_osd_fb(void)
+{
+    if (osd_db.dirty[osd_db.next] == 0 && osd_bufs[osd_db.next].buff_addr) {
+        return osd_bufs[osd_db.next].buff_addr;
+    }
+    return NULL;
+}
+
+static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int height, uint32_t* fb_id, int* out_idx)
+{
+    if (rotate_video_pool.w != width || rotate_video_pool.h != height) {
+        rotate_video_pool_init(ctx, width, height);
+        rotate_video_pool.count = 0;
+    }
+    int idx = rotate_video_pool.count;
+    rotate_video_pool.count = (rotate_video_pool.count + 1) % ROTATE_BUF_COUNT;
+    if (fb_id) *fb_id = rotate_video_pool.fb_id[idx];
+    if (out_idx) *out_idx = idx;
+    //printf("[ DRM ] Using rotate pool buffer %d for %dx%d rotation\n", idx, width, height);
+    return rotate_video_pool.dma_fd[idx];
+}
+
+void drm_push_new_video_frame(int dma_fd, int width, int height)
+{
+    struct drm_context_t *ctx = drm_get_ctx();
+    int need_rotate = (ctx->rotate == 90 || ctx->rotate == 270 || ctx->rotate == 180);
+    int out_width = width, out_height = height;
+    int rotated_dma_fd = dma_fd;
+    uint32_t rotated_fb_id = 0;
+
+    if (need_rotate) {
+        out_width = height;
+        out_height = width;
+        int rotate_idx = -1;
+        rotated_dma_fd = get_next_rotate_dma_fd(ctx, out_width, out_height, &rotated_fb_id, &rotate_idx);
+        if (rotated_dma_fd < 0) {
+            fprintf(stderr, "[ DRM ] All rotate buffers busy, dropping frame!\n");
+            return;
+        }
+        int rotate = 0;
+        if(ctx->rotate == 90) {
+            rotate = IM_HAL_TRANSFORM_ROT_90;
+        } else if (ctx->rotate == 270) {
+            rotate = IM_HAL_TRANSFORM_ROT_270;
+        } else if (ctx->rotate == 180) {
+            rotate = IM_HAL_TRANSFORM_ROT_180;
+            out_width = width;
+            out_height = height;
+        }
+
+        int rga_ret = rga_nv12_rotate(
+            dma_fd, rotated_dma_fd, width, height, rotate);
+        if (rga_ret != 0) {
+            fprintf(stderr, "[ DRM ] RGA rotation failed, showing non-rotated frame\n");
+            rotated_dma_fd = dma_fd;
+            out_width = width;
+            out_height = height;
+            rotated_fb_id = 0;
+        }
+    }
+
+    int idx = -1;
+    for (int i = 0; i < video_buf_map.count; ++i) {
+        if (video_buf_map.dma_fd[i] == rotated_dma_fd) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx < 0) {
+        if (video_buf_map.count >= MAX_VIDEO_BUFS) {
+            int to_cleanup = (video_buf_map.cur + 1) % MAX_VIDEO_BUFS;
+
+            if (video_buf_map.fb_id[to_cleanup] > 0) {
+                drmModeRmFB(ctx->drm_fd, video_buf_map.fb_id[to_cleanup]);
+                printf("[ DRM ] Cleaned up old video FB %d\n", video_buf_map.fb_id[to_cleanup]);
+            }
+            if (video_buf_map.dma_fd[to_cleanup] > 0) {
+                close(video_buf_map.dma_fd[to_cleanup]);
+                printf("[ DRM ] Closed old DMA FD %d\n", video_buf_map.dma_fd[to_cleanup]);
+            }
+
+            idx = to_cleanup;
+        } else {
+            idx = video_buf_map.count++;
+            printf("[ DRM ] Registering new NV12 video buffer at index %d\n", idx);
+        }
+
+        uint32_t fb_id = rotated_fb_id;
+        if (!fb_id) {
+            printf("[ DRM ] Registered new NV12 video buffer with fd %d\n", rotated_dma_fd);
+            fb_id = drm_prepare_nv12_fb(ctx, rotated_dma_fd, out_width, out_height);
+        }
+        video_buf_map.video_height = out_height;
+        video_buf_map.video_width = out_width;
+        video_buf_map.dma_fd[idx] = rotated_dma_fd;
+        video_buf_map.fb_id[idx] = fb_id;
+        video_buf_map.dirty[idx] = 1;
+    } else {
+        video_buf_map.dirty[idx] = 1;
+    }
+
+    if (idx >= 0) {
+        video_buf_map.cur = idx;
+#if DRM_DEBUG
+        printf("[ DRM ] Pushed new video frame to buffer %d (DMA FD: %d, FB ID: %u)\n",
+               idx, video_buf_map.dma_fd[idx], video_buf_map.fb_id[idx]);
+#endif
+    }
+    struct dma_buf_sync sync = {0};
+    sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
+    ioctl(dma_fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+static void fill_transparent_argb8888(struct drm_fb_t *fb, int width, int height)
+{
+    uint32_t *p = (uint32_t *)fb->buff_addr;
+    int stride = fb->pitches[0] / 4;
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+            p[y * stride + x] = 0x00000000;
+}
+
+static void fill_black_nv12(uint8_t *buf, int width, int height)
+{
+    memset(buf, 0, width * height);
+    memset(buf + width * height, 128, width * height / 2);
+}
+
+static void* compositor_thread(void* arg)
+{
+    struct drm_context_t *ctx = (struct drm_context_t *)arg;
+
+    if (!ctx || ctx->drm_fd < 0) {
+        fprintf(stderr, "[ DRM ] Invalid DRM context in compositor thread\n");
+        return NULL;
+    } else {
+        printf("[ DRM ] Compositor thread started with DRM fd %d\n", ctx->drm_fd);
+    }
+
+    drm_create_osd_buff_pool(ctx);
+
+    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
+        fill_transparent_argb8888(&osd_bufs[i], ctx->display_info.hdisplay, ctx->display_info.vdisplay);
+        //fill_rainbow_argb8888(&osd_bufs[i], ctx->display_info.hdisplay, ctx->display_info.vdisplay);
+        osd_db.dirty[i] = 0;
+    }
+
+    if (video_buf_map.count == 0) {
+        int w = ctx->display_info.hdisplay;
+        int h = ctx->display_info.vdisplay;
+        size_t sz = w * h * 3 / 2;
+        uint8_t *black_nv12 = malloc(sz);
+        fill_black_nv12(black_nv12, w, h);
+        int dma_fd = alloc_nv12_dmabuf_from_ram(black_nv12, w, h);
+        free(black_nv12);
+        if (dma_fd >= 0) {
+            video_buf_map.dma_fd[0] = dma_fd;
+            video_buf_map.fb_id[0] = drm_prepare_nv12_fb(ctx, dma_fd, w, h);
+            video_buf_map.video_width = w;
+            video_buf_map.video_height = h;
+            video_buf_map.count = 1;
+            video_buf_map.cur = 0;
+            video_buf_map.dirty[0] = 0;
+        }
+    }
+
+    if (ctx->rotate == 90 || ctx->rotate == 270) {
+        // Initialize rotation buffer pool for 90° or 270° rotation
+        rotate_video_pool_init(ctx, ctx->display_info.vdisplay, ctx->display_info.hdisplay);
+        rotate_osd_pool_init(ctx, ctx->display_info.vdisplay, ctx->display_info.hdisplay);
+    } else {
+        rotate_video_pool.w = ctx->display_info.hdisplay;
+        rotate_video_pool.h = ctx->display_info.vdisplay;
+        rotate_osd_pool.w = ctx->display_info.hdisplay;
+        rotate_osd_pool.h = ctx->display_info.vdisplay;
+    }
+
+    drm_init_event_context();
+
+    // Force initial commit to display the first frame
+    int video_cur = video_buf_map.cur;
+    drm_atomic_commit_all_buffers(ctx,
+                                  &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                  video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
+                                  video_buf_map.video_width, video_buf_map.video_height);
+
+    atomic_store(&pending_commit, 1);
+
+    while (atomic_load(&running)) {
+        if (atomic_load(&pending_commit)) {
+            video_cur = video_buf_map.cur;
+            drm_atomic_commit_all_buffers(ctx,
+                                          &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                          video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
+                                          video_buf_map.video_width, video_buf_map.video_height);
+            atomic_store(&pending_commit, 0);
+        }
+        drmHandleEvent(ctx->drm_fd, &evctx);
+        usleep(5000); // Sleep for 5 ms to avoid busy-waiting new events
+    }
+
+    printf("[ DRM ] Compositor thread exiting\n");
+    return NULL;
 }
 
 struct drm_context_t *drm_get_ctx(void)
@@ -999,36 +1569,47 @@ struct drm_context_t *drm_get_ctx(void)
     return &drm_context;
 }
 
-int drm_osd_buffer_flush(struct drm_context_t *ctx, struct drm_fb_t *osd_fb)
+static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation)
 {
-    if (!ctx || ctx->drm_fd < 0 || ctx->argb888_plane_id < 0 || !osd_fb)
-        return -EINVAL;
+#if DRM_DEBUG
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+#endif
+    im_handle_param_t src_param = {
+        .width = src_width,
+        .height = src_height,
+        .format = RK_FORMAT_ARGB_8888
+    };
+    im_handle_param_t dst_param = {
+        .width = src_height,
+        .height = src_width,
+        .format = RK_FORMAT_ARGB_8888
+    };
 
-    int width  = ctx->display_info.hdisplay;
-    int height = ctx->display_info.vdisplay;
-    struct drm_plane_props *p = &ctx->osd_plane_props;
+    rga_buffer_handle_t src_handle = importbuffer_fd(src_fd, &src_param);
+    rga_buffer_handle_t dst_handle = importbuffer_fd(dst_fd, &dst_param);
 
-    drmModeAtomicReq *req = drmModeAtomicAlloc();
-    if (!req) return -ENOMEM;
-
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->fb_id,   osd_fb->fb_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_id, ctx->crtc->crtc_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_x,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_y,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_w,   width << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->src_h,   height << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_x,  0);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_y,  0);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_w,  width);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, p->crtc_h,  height);
-
-    int ret = drmModeAtomicCommit(ctx->drm_fd, req, ctx->drm_flags, NULL);
-    drmModeAtomicFree(req);
-
-    if (ret < 0) {
-        fprintf(stderr, "[ DRM ] drm_osd_buffer_flush: drmModeAtomicCommit failed: %s\n", strerror(errno));
+    if (src_handle == 0 || dst_handle == 0) {
+        fprintf(stderr, "[RGA] importbuffer_fd failed\n");
+        if (src_handle) releasebuffer_handle(src_handle);
+        if (dst_handle) releasebuffer_handle(dst_handle);
+        return -1;
     }
-    return ret;
+    rga_buffer_t src = wrapbuffer_handle(src_handle, src_width, src_height, RK_FORMAT_ARGB_8888);
+    rga_buffer_t dst = wrapbuffer_handle(dst_handle, src_height, src_width, RK_FORMAT_ARGB_8888);
+
+    imrotate(src, dst, rotation);
+
+    releasebuffer_handle(src_handle);
+    releasebuffer_handle(dst_handle);
+
+#if DRM_DEBUG
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
+    double ms = usec / 1000.0;
+    printf("[ RGA ] Rotation completed %.3f ms\n", ms);
+#endif
+    return 0;
 }
 
 static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation)
@@ -1039,14 +1620,14 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
 #endif
 
     im_handle_param_t src_param = {
-            .width = src_width,
-            .height = src_height,
-            .format = RK_FORMAT_YCbCr_420_SP
+        .width = src_width,
+        .height = src_height,
+        .format = RK_FORMAT_YCbCr_420_SP
     };
     im_handle_param_t dst_param = {
-            .width = src_height,
-            .height = src_width,
-            .format = RK_FORMAT_YCbCr_420_SP
+        .width = src_height,
+        .height = src_width,
+        .format = RK_FORMAT_YCbCr_420_SP
     };
 
     // Import dma_buf into RGA
@@ -1079,75 +1660,19 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
     return 0;
 }
 
-static int ensure_rotate_dma_fd(struct drm_context_t *ctx, int w, int h)
-{
-    size_t sz = w * h * 3 / 2;
-    if (ctx->rotate_dma_fd >= 0 && ctx->rotate_buf_w == w && ctx->rotate_buf_h == h)
-        return ctx->rotate_dma_fd;
-
-    int fd = alloc_dmabuf_fd(sz);
-    if (fd < 0) return -1;
-
-    ctx->rotate_dma_fd = fd;
-    ctx->rotate_buf_size = sz;
-    ctx->rotate_buf_w = w;
-    ctx->rotate_buf_h = h;
-    return fd;
-}
-
-int drm_nv12_frame_flush(int dma_fd, int width, int height)
-{
-    if (dma_fd < 0 || width <= 0 || height <= 0) {
-        fprintf(stderr, "[ DRM ] Invalid parameters for drm_nv12_frame_flush\n");
-        return -EINVAL;
-    }
-
-    struct drm_context_t *ctx = drm_get_ctx();
-    if (!ctx) {
-        fprintf(stderr, "[ DRM ] DRM context not initialized\n");
-        return -ENODEV;
-    }
-
-    int fb_id = -1;
-
-    if (ctx->rotate == 0 || ctx->rotate == 180) {
-        // No rotation or 180°: direct display
-        fb_id = drm_prepare_nv12_fb(ctx, dma_fd, width, height);
-        if (fb_id < 0) {
-            fprintf(stderr, "[ DRM ] Failed to prepare NV12 framebuffer\n");
-            return fb_id;
-        }
-        return drm_atomic_commit_video(ctx, width, height, fb_id);
-
-    } else if (ctx->rotate == 90 || ctx->rotate == 270) {
-        // 90° or 270° rotation required: use RGA
-        int dst_fd = ensure_rotate_dma_fd(ctx, height, width);
-        if (dst_fd < 0) {
-            fprintf(stderr, "Failed to alloc rotation buffer\n");
-            return -ENOMEM;
-        }
-        int rga_ret = rga_nv12_rotate(dma_fd, dst_fd, width, height,
-                                      ctx->rotate == 90 ? IM_HAL_TRANSFORM_ROT_90 : IM_HAL_TRANSFORM_ROT_270);
-        if (rga_ret != 0) {
-            fprintf(stderr, "[ DRM ] RGA rotation failed\n");
-            return -1;
-        }
-        fb_id = drm_prepare_nv12_fb(ctx, dst_fd, height, width);
-        if (fb_id < 0) {
-            fprintf(stderr, "[ DRM ] Failed to prepare NV12 framebuffer\n");
-            return fb_id;
-        }
-        drm_atomic_commit_video(ctx, height, width, fb_id);
-        return 0;
-
-    } else {
-        fprintf(stderr, "[ DRM ] Invalid rotation value: %d\n", ctx->rotate);
-        return -EINVAL;
-    }
-}
-
 void drm_close(void)
 {
+    //pthread_mutex_destroy(&drm_mutex);
+
+    printf("[ DRM ] Close...\n");
+    if (!atomic_load(&running)) {
+        printf("[ DRM ] Not running, nothing to stop\n");
+    } else {
+        atomic_store(&running, 0);
+        pthread_join(drm_thread, NULL);
+        printf("[ DRM ] Stopped compositor thread\n");
+    }
+
     if (drm_context.drm_fd > 0) {
         close(drm_context.drm_fd);
         drm_context.drm_fd = -1;
@@ -1156,11 +1681,8 @@ void drm_close(void)
         fprintf(stderr, "[ DRM ] DRM device not initialized or already closed\n");
     }
 
-    if (drm_context.rotate_dma_fd > 0) {
-        close(drm_context.rotate_dma_fd);
-        drm_context.rotate_dma_fd = -1;
-        printf("[ DRM ] Closed rotate DMA buffer\n");
-    } else {
-        fprintf(stderr, "[ DRM ] Rotate DMA buffer not initialized or already closed\n");
-    }
+    rotate_pool_cleanup(&drm_context);
+    rotate_osd_pool_cleanup(&drm_context);
+    video_buf_map_cleanup(&drm_context);
+    drm_cleanup_osd_buff_pool(&drm_context);
 }
