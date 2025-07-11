@@ -54,13 +54,14 @@ static char current_fc_variant[5];
 #define SPLASH_STRING "OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
 
-#define MAX_DISPLAY_X 60
-#define MAX_DISPLAY_Y 22
+#define MAX_DISPLAY_X 53
+#define MAX_DISPLAY_Y 20
 
 #define BYTES_PER_PIXEL 4
 
 static int display_width = 0;
 static int display_height = 0;
+static int rotation = 0; // 0, 90, 180, 270
 
 static uint16_t msp_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
@@ -74,8 +75,8 @@ static uint8_t frame_waiting = 0;
 
 // TODO: add support for different display modes FULL HD, HD, SD, etc.
 static display_info_t sd_display_info = {
-    .char_width = 30,
-    .char_height = 15,
+    .char_width = 53,
+    .char_height = 20,
     .font_width = 36,
     .font_height = 54,
     .x_offset = 0,
@@ -84,8 +85,8 @@ static display_info_t sd_display_info = {
 };
 
 static display_info_t full_display_info = {
-    .char_width = 60,
-    .char_height = 22,
+    .char_width = 53,
+    .char_height = 20,
     .font_width = 24,
     .font_height = 36,
     .x_offset = 0,
@@ -94,22 +95,22 @@ static display_info_t full_display_info = {
 };
 
 static display_info_t hd_display_info = {
-    .char_width = 50,
-    .char_height = 18,
+    .char_width = 53,
+    .char_height = 20,
     .font_width = 24,
     .font_height = 36,
-    .x_offset = 0,
+    .x_offset = 5,
     .y_offset = 0,
     .fonts = {NULL, NULL, NULL, NULL},
 };
 
 static display_info_t overlay_display_info = {
-    .char_width = 50,
-    .char_height = 18,
+    .char_width = 53,
+    .char_height = 20,
     .font_width = 24,
     .font_height = 36,
-    .x_offset = 100,
-    .y_offset = 650,
+    .x_offset = 5,
+    .y_offset = 0,
     .fonts = {NULL, NULL, NULL, NULL},
 };
 
@@ -151,45 +152,104 @@ static void clear_framebuffer() {
         return;
     }
     // DJI has a backwards alpha channel - FF is transparent, 00 is opaque.
-    memset(fb_addr, 0x00000000, display_width * display_height * BYTES_PER_PIXEL);
+    memset(fb_addr, 0, display_width * display_height * BYTES_PER_PIXEL);
 }
 
-static void draw_character_map(display_info_t *display_info, void* restrict fb_addr, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y]) {
+static void draw_character_map(display_info_t *display_info, void* restrict fb_addr, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
+{
     if (display_info->fonts[0] == NULL) {
         DEBUG_PRINT("No font available, failed to draw.\n");
         return;
     }
-    void* restrict font;
-    for(int y = 0; y < display_info->char_height; y++) {
-        for(int x = 0; x < display_info->char_width; x++) {
+
+    int fb_w = display_width;
+    int fb_h = display_height;
+    int osd_w = display_info->char_width * display_info->font_width;
+    int osd_h = display_info->char_height * display_info->font_height;
+    int x_offset = display_info->x_offset;
+    int y_offset = display_info->y_offset;
+
+    int rx_min = 0, ry_min = 0;
+
+    switch (rotation) {
+    case 0:
+        rx_min = 0;
+        ry_min = 0;
+        break;
+    case 90:
+        rx_min = fb_h - (osd_h + y_offset * 2);
+        ry_min = -x_offset;
+        break;
+    case 180:
+        rx_min = fb_w - (osd_w + x_offset * 2);
+        ry_min = fb_h - (osd_h + y_offset * 2);
+        break;
+    case 270:
+        x_offset = -x_offset;
+        y_offset = -y_offset;
+        rx_min = y_offset;
+        ry_min = fb_w - (osd_w + x_offset * 2) - (fb_h - osd_w);
+        break;
+    }
+#if 0 // Debugging rotation and offsets
+    printf("rx_min=%d, ry_min=%d\n", rx_min, ry_min);
+    printf("Drawing character map with rotation %d, fb_w=%d, fb_h=%d, osd_w=%d, osd_h=%d, x_offset=%d, y_offset=%d\n", rotation, fb_w, fb_h, osd_w, osd_h, x_offset, y_offset);
+#endif
+
+    for (int y = 0; y < display_info->char_height; y++) {
+        for (int x = 0; x < display_info->char_width; x++) {
             uint16_t c = character_map[x][y];
-            if (c != 0) {
-                int page = (c & 0x300) >> 8;
-                c = c & 0xFF;
-                font = display_info->fonts[page];
-                if(font == NULL) {
-                    font = display_info->fonts[0];
-                }
-                uint32_t pixel_x = (x * display_info->font_width) + display_info->x_offset;
-                uint32_t pixel_y = (y * display_info->font_height) + display_info->y_offset;
-                uint32_t font_offset = (((display_info->font_height * display_info->font_width) * BYTES_PER_PIXEL) * c);
-                uint32_t target_offset = ((pixel_x * BYTES_PER_PIXEL) + (pixel_y * display_width * BYTES_PER_PIXEL));
-                for(uint8_t gy = 0; gy < display_info->font_height; gy++) {
-                    for(uint8_t gx = 0; gx < display_info->font_width; gx++) {
-                        *((uint8_t *)fb_addr + target_offset) = *(uint8_t *)((uint8_t *)font + font_offset + 2);
-                        *((uint8_t *)fb_addr + target_offset + 1) = *(uint8_t *)((uint8_t *)font + font_offset + 1);
-                        *((uint8_t *)fb_addr + target_offset + 2) = *(uint8_t *)((uint8_t *)font + font_offset);
-                        *((uint8_t *)fb_addr + target_offset + 3) = *(uint8_t *)((uint8_t *)font + font_offset + 3);
-                        font_offset += BYTES_PER_PIXEL;
-                        target_offset += BYTES_PER_PIXEL;
+            if (c == 0) continue;
+
+            int page = (c & 0x300) >> 8;
+            c = c & 0xFF;
+            void* font = display_info->fonts[page];
+            if (!font) font = display_info->fonts[0];
+
+            uint32_t src_x = x * display_info->font_width + x_offset;
+            uint32_t src_y = y * display_info->font_height + y_offset;
+
+            for (uint8_t gy = 0; gy < display_info->font_height; gy++) {
+                for (uint8_t gx = 0; gx < display_info->font_width; gx++) {
+                    uint32_t px = src_x + gx;
+                    uint32_t py = src_y + gy;
+
+                    int rx = 0, ry = 0;
+                    switch (rotation) {
+                    case 0:
+                        rx = px - rx_min;
+                        ry = py - ry_min;
+                        break;
+                    case 90:
+                        rx = fb_h - 1 - py - rx_min;
+                        ry = px - ry_min;
+                        break;
+                    case 180:
+                        rx = fb_w - 1 - px - rx_min;
+                        ry = fb_h - 1 - py - ry_min;
+                        break;
+                    case 270:
+                        rx = py - rx_min;
+                        ry = fb_w - 1 - px - ry_min;
+                        break;
+                    default:
+                        rx = px - rx_min;
+                        ry = py - ry_min;
+                        break;
                     }
-                    target_offset += display_width * BYTES_PER_PIXEL - (display_info->font_width * BYTES_PER_PIXEL);
+
+                    if (rx < 0 || ry < 0 || rx >= fb_w || ry >= fb_h) continue;
+
+                    uint32_t fb_offset = (ry * fb_w + rx) * BYTES_PER_PIXEL;
+                    uint32_t font_offset = (((display_info->font_height * display_info->font_width) * BYTES_PER_PIXEL) * c) + (gy * display_info->font_width + gx) * BYTES_PER_PIXEL;
+
+                    *((uint8_t *)fb_addr + fb_offset + 0) = *((uint8_t *)font + font_offset + 2); // B
+                    *((uint8_t *)fb_addr + fb_offset + 1) = *((uint8_t *)font + font_offset + 1); // G
+                    *((uint8_t *)fb_addr + fb_offset + 2) = *((uint8_t *)font + font_offset + 0); // R
+                    *((uint8_t *)fb_addr + fb_offset + 3) = *((uint8_t *)font + font_offset + 3); // A
                 }
-                // DEBUG_PRINT("%c", c > 31 ? c : 20);
             }
-            // DEBUG_PRINT(" ");
         }
-        // DEBUG_PRINT("\n");
     }
 }
 
@@ -233,7 +293,7 @@ static void start_display(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
     memset(overlay_character_map, 0, sizeof(overlay_character_map));
 
-    display_print_string(0, 0, SPLASH_STRING, sizeof(SPLASH_STRING));
+    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
     msp_draw_complete();
 }
 
@@ -294,13 +354,11 @@ static void* msp_osd_thread(void *arg)
     struct config_t *cfg = (struct config_t *)arg;
     printf("[ MSP OSD ] Starting MSP OSD thread\n");
 
-    struct drm_context_t *drm_ctx = drm_get_ctx();
-    if (drm_ctx == NULL) {
-        printf("[ MSP OSD ] Failed to get DRM context, exiting thread\n");
+    if (drm_get_osd_frame_size(&display_width, &display_height, &rotation) < 0) {
+        printf("[ MSP OSD ] Failed to get OSD frame size\n");
         return NULL;
     }
-    display_width = drm_ctx->display_info.hdisplay;
-    display_height = drm_ctx->display_info.vdisplay;
+    printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
 
     memset(current_fc_variant, 0, sizeof(current_fc_variant));
 
@@ -324,28 +382,24 @@ static void* msp_osd_thread(void *arg)
     start_display();
     usleep(100000);
 
-    // test all characters
+
+#if 0    // test all characters
     uint8_t c = 0;
     for (int j = 0; j < MAX_DISPLAY_Y; ++j) {
         for (int i = 0; i < MAX_DISPLAY_X; ++i) {
-            msp_draw_character(i, j, c++);
+            msp_draw_character(i, j,c);
+            c++;
             if (c > 255)
-                break;
+                c = 0;
         }
-        if (c > 255)
-            break;
     }
     msp_draw_complete();
+#endif
 
-    usleep(100000);
-
-    int cnt = 0;
+    int cnt = 1;
+    int y = 0;
     char buffer[256];
     while (atomic_load(&running)) {
-        cnt ++;
-        sprintf(buffer, "TEST CNT %d", cnt);
-        display_print_string(0, 1, buffer, strlen(buffer));
-        msp_draw_complete();
 
         usleep(32000);  // Sleep for 32 ms to simulate frame rate 30FPS
     }

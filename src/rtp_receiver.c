@@ -225,7 +225,7 @@ static void* rtp_receiver_thread(void *arg)
 
     // Create main demuxer for packet processing
     demuxer = rtp_demuxer_create(
-            0, 90000, ctx->pt,
+            10, 90000, ctx->pt,
             codec_name,
             main_rtp_cb, ctx
     );

@@ -186,7 +186,7 @@ int fakehd_is_enabled() {
     return fakehd_enabled;
 }
 
-void fakehd_map_sd_character_map_to_hd(uint16_t sd_character_map[60][22], uint16_t hd_character_map[60][22])
+void fakehd_map_sd_character_map_to_hd(uint16_t sd_character_map[52][20], uint16_t hd_character_map[52][20])
 {
     int row[INPUT_COLS];
     int col[INPUT_ROWS];
