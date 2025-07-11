@@ -88,6 +88,9 @@ static atomic_int pending_commit = 0;
 #define MAX_VIDEO_BUFS 16
 #define ROTATE_BUF_COUNT (MAX_VIDEO_BUFS)
 
+#define OSD_WIDTH  1280
+#define OSD_HEIGHT  720
+
 struct drm_fb_t osd_bufs[OSD_BUF_COUNT];
 
 struct {
@@ -97,15 +100,6 @@ struct {
     int cur;
     int next;
 } osd_db = { {0,0}, 0, 1 };
-
-#define ROTATE_OSD_BUF_COUNT OSD_BUF_COUNT
-
-struct rotate_osd_pool_t {
-    int w, h;
-    int dma_fd[ROTATE_OSD_BUF_COUNT];
-    uint32_t fb_id[ROTATE_OSD_BUF_COUNT];
-    int count;
-} rotate_osd_pool = {0};
 
 struct {
     int dma_fd[MAX_VIDEO_BUFS];
@@ -132,6 +126,7 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
 static void drm_init_event_context(void);
 static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
 static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
+static int drm_create_osd_buff_pool(struct drm_context_t *ctx);
 
 static void drm_print_modes(struct drm_context_t *drm_ctx)
 {
@@ -633,6 +628,7 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *os
 
     if (drmModeAtomicCommit(ctx->drm_fd, req, DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT, &cleanup) < 0) {
         fprintf(stderr, "[ DRM ] Atomic commit failed for all planes %s\n", strerror(errno));
+        drmModeAtomicFree(req);
         atomic_store(&pending_commit, 1);
         return -1;
     }
@@ -1064,6 +1060,8 @@ int drm_init(char *device, struct config_t *cfg)
     printf("[ DRM ] Detected rotation: %d degrees\n", drm_context.rotate);
     //drm_context.rotate = 0; // Force set no rotation for testing
 
+    drm_create_osd_buff_pool(&drm_context);
+
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
         printf("[ DRM ] Already running thread\n");
@@ -1195,8 +1193,13 @@ static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
     }
 
     int ret = 0;
-    int width = ctx->display_info.hdisplay;
-    int height = ctx->display_info.vdisplay;
+    int width = OSD_WIDTH;
+    int height = OSD_HEIGHT;
+    if (ctx->rotate == 90 || ctx->rotate == 270) {
+        // Swap width and height for 90/270 degree rotation
+        width = OSD_HEIGHT;
+        height = OSD_WIDTH;
+    }
 
     for (int i = 0; i < OSD_BUF_COUNT; ++i) {
         ret = drm_create_dumb_argb8888_fb(ctx, width, height, &osd_bufs[i]);
@@ -1215,20 +1218,20 @@ static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
 
 }
 
-static void rotate_pool_cleanup(struct drm_context_t *ctx)
+static void rotate_video_pool_cleanup(struct drm_context_t *ctx)
 {
-    printf("[ DRM ] Cleaning up rotate pool\n");
+    printf("[ DRM ] Cleaning up video rotate pool\n");
     for (int i = 0; i < ROTATE_BUF_COUNT; ++i) {
         if (rotate_video_pool.fb_id[i] > 0) {
             if (ctx && ctx->drm_fd > 0) {
                 drmModeRmFB(ctx->drm_fd, rotate_video_pool.fb_id[i]);
-                printf("[ DRM ] Removed rotate pool FB %d\n", rotate_video_pool.fb_id[i]);
+                printf("[ DRM ] Removed video rotate pool FB %d\n", rotate_video_pool.fb_id[i]);
             }
             rotate_video_pool.fb_id[i] = 0;
         }
         if (rotate_video_pool.dma_fd[i] > 0) {
             close(rotate_video_pool.dma_fd[i]);
-            printf("[ DRM ] Closed rotate pool DMA FD %d\n", rotate_video_pool.dma_fd[i]);
+            printf("[ DRM ] Closed video rotate pool DMA FD %d\n", rotate_video_pool.dma_fd[i]);
             rotate_video_pool.dma_fd[i] = -1;
         }
     }
@@ -1252,54 +1255,6 @@ static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int hei
         }
         rotate_video_pool.dma_fd[i] = alloc_dmabuf_fd(width * height * 3 / 2);
         rotate_video_pool.fb_id[i] = drm_prepare_nv12_fb(ctx, rotate_video_pool.dma_fd[i], width, height);
-    }
-}
-
-static void rotate_osd_pool_cleanup(struct drm_context_t *ctx)
-{
-    printf("[ DRM ] Cleaning up rotate OSD pool\n");
-    for (int i = 0; i < ROTATE_OSD_BUF_COUNT; ++i) {
-        if (rotate_osd_pool.fb_id[i] > 0 && ctx->drm_fd > 0) {
-            drmModeRmFB(ctx->drm_fd, rotate_osd_pool.fb_id[i]);
-            printf("[ DRM ] Removed rotate OSD pool FB %d\n", rotate_osd_pool.fb_id[i]);
-            rotate_osd_pool.fb_id[i] = 0;
-        }
-        if (rotate_osd_pool.dma_fd[i] > 0) {
-            close(rotate_osd_pool.dma_fd[i]);
-            printf("[ DRM ] Closed rotate OSD pool DMA FD %d\n", rotate_osd_pool.dma_fd[i]);
-            rotate_osd_pool.dma_fd[i] = -1;
-        }
-    }
-    rotate_osd_pool.w = 0;
-    rotate_osd_pool.h = 0;
-}
-
-static void rotate_osd_pool_init(struct drm_context_t *ctx, int width, int height)
-{
-    printf("[ DRM ] Initializing rotate OSD pool with size %dx%d\n", width, height);
-    if (rotate_osd_pool.w == width && rotate_osd_pool.h == height)
-        return;
-    rotate_osd_pool.w = width;
-    rotate_osd_pool.h = height;
-
-    for (int i = 0; i < ROTATE_OSD_BUF_COUNT; ++i) {
-        if (rotate_osd_pool.fb_id[i] > 0) {
-            drmModeRmFB(ctx->drm_fd, rotate_osd_pool.fb_id[i]);
-            rotate_osd_pool.fb_id[i] = 0;
-        }
-        if (rotate_osd_pool.dma_fd[i] > 0) {
-            close(rotate_osd_pool.dma_fd[i]);
-            rotate_osd_pool.dma_fd[i] = -1;
-        }
-        size_t sz = width * height * 4;
-        rotate_osd_pool.dma_fd[i] = alloc_dmabuf_fd(sz);
-        rotate_osd_pool.fb_id[i] = drm_prepare_argb8888_fb(ctx, rotate_osd_pool.dma_fd[i], width, height);
-        if (rotate_osd_pool.fb_id[i] <= 0) {
-            printf("[ DRM ] ERROR: failed to create ARGB8888 FB for rotate_osd_pool[%d]\n", i);
-        } else {
-            printf("[ DRM ] Rotate OSD pool buffer %d ready: dma_fd=%d, fb_id=%d\n",
-                   i, rotate_osd_pool.dma_fd[i], rotate_osd_pool.fb_id[i]);
-        }
     }
 }
 
@@ -1348,9 +1303,20 @@ static void drm_cleanup_osd_buff_pool(struct drm_context_t *ctx)
     osd_db.next = 1;
 }
 
+int drm_get_osd_frame_size(int *width, int *height, int *rotate)
+{
+    if (width) *width = osd_db.osd_width;
+    if (height) *height = osd_db.osd_height;
+    if (rotate) *rotate = drm_context.rotate;
+    if (osd_db.osd_width <= 0 || osd_db.osd_height <= 0) {
+        fprintf(stderr, "[ DRM ] OSD frame size is not initialized!\n");
+        return -1;
+    }
+    return 0;
+}
+
 void drm_push_new_osd_frame(void)
 {
-    // TODO: need to add rotate OSD buffers
     osd_db.dirty[osd_db.next] = 1;
 }
 
@@ -1494,11 +1460,9 @@ static void* compositor_thread(void* arg)
         printf("[ DRM ] Compositor thread started with DRM fd %d\n", ctx->drm_fd);
     }
 
-    drm_create_osd_buff_pool(ctx);
-
     for (int i = 0; i < OSD_BUF_COUNT; ++i) {
-        fill_transparent_argb8888(&osd_bufs[i], ctx->display_info.hdisplay, ctx->display_info.vdisplay);
-        //fill_rainbow_argb8888(&osd_bufs[i], ctx->display_info.hdisplay, ctx->display_info.vdisplay);
+        fill_transparent_argb8888(&osd_bufs[i], osd_db.osd_width, osd_db.osd_height);
+        //fill_rainbow_argb8888(&osd_bufs[i], osd_db.osd_width, osd_db.osd_height);
         osd_db.dirty[i] = 0;
     }
 
@@ -1519,17 +1483,6 @@ static void* compositor_thread(void* arg)
             video_buf_map.cur = 0;
             video_buf_map.dirty[0] = 0;
         }
-    }
-
-    if (ctx->rotate == 90 || ctx->rotate == 270) {
-        // Initialize rotation buffer pool for 90° or 270° rotation
-        rotate_video_pool_init(ctx, ctx->display_info.vdisplay, ctx->display_info.hdisplay);
-        rotate_osd_pool_init(ctx, ctx->display_info.vdisplay, ctx->display_info.hdisplay);
-    } else {
-        rotate_video_pool.w = ctx->display_info.hdisplay;
-        rotate_video_pool.h = ctx->display_info.vdisplay;
-        rotate_osd_pool.w = ctx->display_info.hdisplay;
-        rotate_osd_pool.h = ctx->display_info.vdisplay;
     }
 
     drm_init_event_context();
@@ -1681,8 +1634,7 @@ void drm_close(void)
         fprintf(stderr, "[ DRM ] DRM device not initialized or already closed\n");
     }
 
-    rotate_pool_cleanup(&drm_context);
-    rotate_osd_pool_cleanup(&drm_context);
+    rotate_video_pool_cleanup(&drm_context);
     video_buf_map_cleanup(&drm_context);
     drm_cleanup_osd_buff_pool(&drm_context);
 }

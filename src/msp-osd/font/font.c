@@ -112,6 +112,18 @@ static int open_font(const char *filename, display_info_t *display_info, const c
         goto err;
     }
 
+    // Clean up the background after PNG decode:
+    // Many font PNGs may contain low non-zero alpha values ("soft" edges or noise) on the transparent background,
+    // which can result in unwanted semi-transparent dots or smudges after blurring/glyph antialiasing.
+    // Here, we ensure that any pixel with low alpha (threshold < 32) is fully cleared (set to zero RGBA).
+    // This guarantees a crisp, artifact-free font rendering after further post-processing.
+    for (size_t i = 0; i < image_size; i += 4) {
+        uint8_t *rgba = (uint8_t*)font_data + i;
+        if (rgba[3] < 32) {
+            rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0;
+        }
+    }
+
     for(int page = 0; page < num_pages; page++) {
         DEBUG_PRINT("Loading font page %d of %d, placing %x\n", page, num_pages, display_info->fonts);
         display_info->fonts[page] = malloc(display_info->font_width * display_info->font_height * NUM_CHARS * BYTES_PER_PIXEL);
