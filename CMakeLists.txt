@@ -76,7 +76,7 @@ target_link_libraries(${PROJECT_NAME} m rtp
 # Install to /usr/local/bin/
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 
-#install assets
+#install assets /usr/etc/msp-osd/fonts
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/
         DESTINATION etc/msp-osd/fonts
         FILES_MATCHING PATTERN "*.*")

@@ -4,7 +4,7 @@
 
 #include "../util/display_info.h"
 
-#define FALLBACK_FONT_PATH "/etc/msp-osd/fonts/font"
+#define FALLBACK_FONT_PATH "/usr/etc/msp-osd/fonts/font"
 #define ENTWARE_FONT_PATH "/opt/fonts/font"
 #define SDCARD_FONT_PATH "/storage/sdcard0/font"
 
