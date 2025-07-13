@@ -79,8 +79,8 @@ static void print_usage(const char* prog)
     printf("Usage: %s [--ip <address>] [--port <number>] [--help]\n", prog);
     printf("Options:\n");
     printf("  --ip <address>   Set the IP address to listen on (default: 0.0.0.0)\n");
-    printf("  --port <number>  Set the port to listen on (default: 5602)\n");
-    printf("  --wfb            WFB status link port (default: 8003)\n");
+    printf("  --port <number>  Set the port to listen for RTP stream (default: 5602)\n");
+    printf("  --wfb            Set the port to listen for wfb-server link status (default: 8003)\n");
     printf("Defaults: --ip 0.0.0.0 --port 5602 --wfb 8003\n");
 }
 
@@ -102,7 +102,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
             break;
         case 'p': {
             int port = atoi(optarg);
-            if (port < 1 || port > 65535) {
+            if (port < 1 || port > 65535 || config->wfb_port == port) {
                 fprintf(stderr, "Invalid port number: %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
