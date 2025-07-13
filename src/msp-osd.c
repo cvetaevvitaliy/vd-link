@@ -42,9 +42,12 @@
 #include "util/debug.h"
 #include "net/data_protocol.h"
 #include "drm_display.h"
+#include "wfb_status_link.h"
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
+
+#define DEBUG_PRINT_LINK 0
 
 static pthread_t msp_thread;
 static atomic_int running = 0;
@@ -70,8 +73,6 @@ static displayport_vtable_t *display_driver;
 struct timespec last_render;
 
 static char current_fc_variant[5];
-
-static uint8_t frame_waiting = 0;
 
 // TODO: add support for different display modes FULL HD, HD, SD, etc.
 static display_info_t sd_display_info = {
@@ -130,22 +131,26 @@ static void draw_character(display_info_t *display_info, uint16_t character_map[
     character_map[x][y] = c;
 }
 
-static void display_print_string(uint8_t init_x, uint8_t y, const char *string, uint8_t len) {
+static void display_print_string(uint8_t init_x, uint8_t y, const char *string, uint8_t len)
+{
     for(uint8_t x = 0; x < len; x++) {
         draw_character(&overlay_display_info, overlay_character_map, x + init_x, y, string[x]);
     }
 }
 
-static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c) {
+static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c)
+{
     draw_character(current_display_info, msp_character_map, x, y, c);
 }
 
-static void msp_clear_screen() {
+static void msp_clear_screen(void)
+{
     memset(msp_character_map, 0, sizeof(msp_character_map));
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
 }
 
-static void clear_framebuffer() {
+static void clear_framebuffer(void)
+{
     void *fb_addr = drm_get_next_osd_fb();
     if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
@@ -253,7 +258,8 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
     }
 }
 
-static void draw_screen() {
+static void draw_screen(void)
+{
     clear_framebuffer();
 
     void *fb_addr = drm_get_next_osd_fb();
@@ -271,7 +277,8 @@ static void draw_screen() {
     draw_character_map(&overlay_display_info, fb_addr, overlay_character_map);
 }
 
-static void render_screen() {
+static void render_screen(void)
+{
     draw_screen();
     if (display_mode == DISPLAY_DISABLED) {
         clear_framebuffer();
@@ -282,7 +289,7 @@ static void render_screen() {
 }
 
 
-static void msp_draw_complete()
+static void msp_draw_complete(void)
 {
     render_screen();
 }
@@ -321,7 +328,8 @@ static void msp_callback(msp_msg_t *msp_message)
     displayport_process_message(display_driver, msp_message);
 }
 
-static void load_fonts(char* font_variant) {
+static void load_fonts(char* font_variant)
+{
     char file_path[255];
     get_font_path_with_extension(file_path, "font", ".png", 255, 0, font_variant);
     toast(file_path);
@@ -331,14 +339,16 @@ static void load_fonts(char* font_variant) {
     load_font(&overlay_display_info, font_variant);
 }
 
-static void close_all_fonts() {
+static void close_all_fonts(void)
+{
     close_font(&sd_display_info);
     close_font(&hd_display_info);
     close_font(&overlay_display_info);
     close_font(&full_display_info);
 }
 
-void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y], int char_w, int char_h) {
+void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y], int char_w, int char_h)
+{
     int val = 0;
     for (int y = 0; y < char_h; y++) {
         for (int x = 0; x < char_w; x++) {
@@ -347,6 +357,43 @@ void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_D
                 return;
         }
     }
+}
+
+#define CHAR_LINK_LQ "\x7B"
+#define CHAR_LINK_BW "\x70"
+void wfb_status_link_callback(const wfb_rx_status *st)
+{
+    char str[128];
+    int len = 0;
+    if (st->ants_count > 0) {
+        memset(overlay_character_map, 0, sizeof(overlay_character_map));
+        // freq, link quality symbol, rssi_avg, bitrate
+        len = snprintf(str, sizeof(str), "%d " CHAR_LINK_BW "%.1f " CHAR_LINK_LQ "%d",
+                       (int)st->ants[0].freq,
+                       st->ants[0].bitrate_mbps,
+                       (int)st->ants[0].rssi_avg);
+
+        for (int i = 1; i < st->ants_count; ++i) {
+            // Additional antennas, only RSSI
+            int l = snprintf(str + len, sizeof(str) - len,
+                             " " CHAR_LINK_LQ "%d", (int)st->ants[i].rssi_avg);
+            if (l > 0 && l < (int)(sizeof(str) - len)) len += l;
+        }
+        display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
+        msp_draw_complete(); // TODO: need to synchronize with MSP data draw_complete
+    }
+
+#if DEBUG_PRINT_LINK
+    for (int i = 0; i < st->ants_count; ++i) {
+        printf("[MSP OSD] WFB status link ant[%d]: freq=%lld mcs=%lld bw=%lld ant_id=%lld pkt_delta=%lld bitrate=%.1f rssi=[%lld/%lld/%lld] snr=[%lld/%lld/%lld]\n",
+               i,
+               st->ants[i].freq, st->ants[i].mcs, st->ants[i].bw, st->ants[i].ant_id,
+               st->ants[i].pkt_delta,
+               st->ants[i].bitrate_mbps,
+               st->ants[i].rssi_min, st->ants[i].rssi_avg, st->ants[i].rssi_max,
+               st->ants[i].snr_min, st->ants[i].snr_avg, st->ants[i].snr_max);
+    }
+#endif
 }
 
 static void* msp_osd_thread(void *arg)
@@ -377,11 +424,12 @@ static void* msp_osd_thread(void *arg)
     msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
 
-    load_fonts("btfl"); // TODO: all .png fonts should be cleaned of small dots for FULL HD modes
+    load_fonts("btfl");
 
     start_display();
     usleep(100000);
 
+    wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
 
 #if 0    // test all characters
     uint8_t c = 0;
@@ -393,16 +441,15 @@ static void* msp_osd_thread(void *arg)
                 c = 0;
         }
     }
+    usleep(100000);
     msp_draw_complete();
 #endif
-
-    int cnt = 1;
-    int y = 0;
-    char buffer[256];
     while (atomic_load(&running)) {
-
-        usleep(32000);  // Sleep for 32 ms to simulate frame rate 30FPS
+        // noting now
+        usleep(10000);
     }
+
+    wfb_status_link_stop();
 
     free(display_driver);
     free(msp_state);
@@ -433,5 +480,4 @@ void msp_osd_stop(void)
     }
     atomic_store(&running, 0);
     pthread_join(msp_thread, NULL);
-
 }

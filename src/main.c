@@ -36,6 +36,7 @@
 #include "src/common.h"
 #include "src/drm_display.h"
 #include "msp-osd.h"
+#include "wfb_status_link.h"
 
 static volatile int running = 1;
 
@@ -79,8 +80,8 @@ static void print_usage(const char* prog)
     printf("Options:\n");
     printf("  --ip <address>   Set the IP address to listen on (default: 0.0.0.0)\n");
     printf("  --port <number>  Set the port to listen on (default: 5602)\n");
-    printf("  --vsync          Enable vertical synchronization (default: off)\n");
-    printf("Defaults: --ip 0.0.0.0 --port 5602\n");
+    printf("  --wfb            WFB status link port (default: 8003)\n");
+    printf("Defaults: --ip 0.0.0.0 --port 5602 --wfb 8003\n");
 }
 
 static void parse_args(int argc, char* argv[], struct config_t* config)
@@ -88,12 +89,13 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     static struct option long_options[] = {
             {"ip", required_argument, 0, 'i'},
             {"port", required_argument, 0, 'p'},
+            {"wfb", required_argument, 0, 'w'},
             {"help", no_argument, 0, 'h'},
             {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "i:p:v:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "i:p:v:w:h", long_options, NULL)) != -1) {
         switch (opt) {
         case 'i':
             config->ip = optarg;
@@ -105,6 +107,14 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
                 exit(EXIT_FAILURE);
             }
             config->port = port;
+        } break;
+        case 'w': {
+            int port = atoi(optarg);
+            if (port < 1 || port > 65535 || config->port == port) {
+                fprintf(stderr, "Invalid WFB port number: %s\n", optarg);
+                exit(EXIT_FAILURE);
+            }
+            config->wfb_port = port;
         } break;
         case 'h':
         default:
@@ -119,6 +129,7 @@ int main(int argc, char* argv[])
     struct config_t config = {
         .ip = "0.0.0.0",
         .port = 5602,
+        .wfb_port = 8003,
         .pt = 0,
         .codec = CODEC_UNKNOWN,
     };
