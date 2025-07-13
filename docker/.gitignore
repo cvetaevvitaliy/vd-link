@@ -8,3 +8,5 @@ log.csv
 *.flp
 .vscode-ctags
 .DS_Store
+aarch64-buildroot-linux-gnu_sdk-buildroot/
+aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz

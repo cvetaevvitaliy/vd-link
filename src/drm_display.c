@@ -1325,6 +1325,7 @@ void *drm_get_next_osd_fb(void)
     if (osd_db.dirty[osd_db.next] == 0 && osd_bufs[osd_db.next].buff_addr) {
         return osd_bufs[osd_db.next].buff_addr;
     }
+    fprintf(stderr, "[ DRM ] OSD buffer %d is dirty or not available\n", osd_db.next);
     return NULL;
 }
 
