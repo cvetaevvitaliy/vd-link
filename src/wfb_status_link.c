@@ -150,6 +150,10 @@ static int process_rx(const msgpack_object *packet)
                 int64_t mcs  = akv->key.via.array.ptr[0].via.array.ptr[1].via.i64;
                 int64_t bw   = akv->key.via.array.ptr[0].via.array.ptr[2].via.i64;
                 int64_t ant_id = akv->key.via.array.ptr[1].via.i64;
+                if (ant_id < 0) {
+                    fprintf(stderr, "[ WFB STATUS LINK ] Invalid antenna ID %lld\n", (long long)ant_id);
+                    continue;
+                }
 
                 // Value: [pkt_delta, rssi_min, rssi_avg, rssi_max, snr_min, snr_avg, snr_max]
                 if (akv->val.type == MSGPACK_OBJECT_ARRAY && akv->val.via.array.size >= 7) {
@@ -181,11 +185,11 @@ static int process_rx(const msgpack_object *packet)
                            (long long)freq, (long long)mcs, (long long)bw,
                            packets_delta, bitrate, rssi_min, rssi_avg, rssi_max, snr_min, snr_avg, snr_max);
 #endif
-                    if (ant_id < 0 || ant_id >= MAX_RX_ANT_STATS) {
-                        fprintf(stderr, "[ WFB STATUS LINK ] Invalid antenna ID %lld\n", (long long)ant_id);
-                        continue;
-                    }
                     status.ants_count++;
+                    if (status.ants_count >= MAX_RX_ANT_STATS) {
+                        fprintf(stderr, "[ WFB STATUS LINK ] Too many antennas, max %d\n", MAX_RX_ANT_STATS);
+                        break; // Prevent overflow
+                    }
                 }
             }
         }

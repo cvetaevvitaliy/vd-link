@@ -71,6 +71,10 @@ static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t overlay_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static displayport_vtable_t *display_driver;
 struct timespec last_render;
+static volatile bool need_render = false;
+
+static void render_display(void);
+static void need_render_display(void);
 
 static char current_fc_variant[5];
 
@@ -378,9 +382,9 @@ void wfb_status_link_callback(const wfb_rx_status *st)
             int l = snprintf(str + len, sizeof(str) - len,
                              " " CHAR_LINK_LQ "%d", (int)st->ants[i].rssi_avg);
             if (l > 0 && l < (int)(sizeof(str) - len)) len += l;
+            display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
         }
-        display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
-        msp_draw_complete(); // TODO: need to synchronize with MSP data draw_complete
+        need_render_display();  // TODO: need to synchronize with MSP data draw_complete
     }
 
 #if DEBUG_PRINT_LINK
@@ -394,6 +398,21 @@ void wfb_status_link_callback(const wfb_rx_status *st)
                st->ants[i].snr_min, st->ants[i].snr_avg, st->ants[i].snr_max);
     }
 #endif
+}
+
+static void need_render_display(void)
+{
+    if (need_render) {
+        return; // already scheduled
+    }
+    need_render = true;
+    clock_gettime(CLOCK_MONOTONIC, &last_render);
+}
+
+static void render_display(void)
+{
+    msp_draw_complete();
+    need_render = false;
 }
 
 static void* msp_osd_thread(void *arg)
@@ -446,6 +465,9 @@ static void* msp_osd_thread(void *arg)
 #endif
     while (atomic_load(&running)) {
         // noting now
+        if(need_render) {
+            render_display();
+        }
         usleep(10000);
     }
 
