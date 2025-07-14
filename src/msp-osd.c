@@ -382,8 +382,8 @@ void wfb_status_link_callback(const wfb_rx_status *st)
             int l = snprintf(str + len, sizeof(str) - len,
                              " " CHAR_LINK_LQ "%d", (int)st->ants[i].rssi_avg);
             if (l > 0 && l < (int)(sizeof(str) - len)) len += l;
-            display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
         }
+        display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
         need_render_display();  // TODO: need to synchronize with MSP data draw_complete
     }
 
