@@ -64,8 +64,6 @@ set(MSP_OSD_SRC
         src/msp-osd/util/fs_util.c
 )
 
-# add_definitions(-DDEBUG=1)
-
 add_executable(${PROJECT_NAME}
         ${MSP_OSD_SRC}
         src/main.c
