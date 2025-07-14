@@ -41,15 +41,18 @@
 #include <rockchip/rk_mpi.h>
 #include <sys/ioctl.h>
 #include <rga/im2d_buffer.h>
-#include <rga/im2d_buffer.h>
 #include <rga/im2d_single.h>
 #include <rga/rga.h>
 #include <linux/dma-heap.h>
 #include <dirent.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <linux/dma-buf.h>
 
 #define DRM_DEBUG 0
+#define DRM_DEBUG_ROTATE 0
+
+#define ALIGN(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 
 static struct drm_context_t drm_context = {
         .display_info = {0},
@@ -112,7 +115,7 @@ struct {
 } video_buf_map = { .count = 0, .cur = 0 };
 
 struct rotate_video_pool_t {
-    int w, h;
+    int w, h, hor_stride, ver_stride;
     int dma_fd[ROTATE_BUF_COUNT];
     uint32_t fb_id[ROTATE_BUF_COUNT];
     int count;
@@ -124,7 +127,7 @@ static int64_t drm_get_prop_value(int fd, uint32_t obj_id, uint32_t obj_type, co
 static void* compositor_thread(void* arg);
 static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data);
 static void drm_init_event_context(void);
-static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
+static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int wstride, int hstride, int rotation);
 static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
 static int drm_create_osd_buff_pool(struct drm_context_t *ctx);
 
@@ -438,13 +441,12 @@ static void drm_fill_plane_props(int drm_fd, uint32_t plane_id, struct drm_plane
     props->zpos_value = drm_get_prop_value(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE, "zpos");
 }
 
-static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width, int height)
+static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width, int height, int hor_stride, int ver_stride)
 {
-#if DRM_DEBUG
-    printf("[ DRM ] Preparing NV12 framebuffer with DMA-FD %d, size %dx%d\n", dma_fd, width, height);
+    printf("[ DRM ] Preparing NV12 framebuffer with DMA-FD %d, size: %dx%d, stride: %dx%d\n",
+           dma_fd, width, height, hor_stride, ver_stride);
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
-#endif
     // Import DMA-BUF as DRM buffer handle
     struct drm_prime_handle prime = {
             .fd = dma_fd,
@@ -456,28 +458,31 @@ static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width,
         return -1;
     }
 
-    // Prepare FB2 structure for NV12 (Y and UV in same buffer, with proper offsets)
+    // Calculate aligned offsets
+    uint32_t y_stride = hor_stride;
+    uint32_t uv_stride = hor_stride;
+    uint32_t y_size = y_stride * ver_stride;
+    uint32_t uv_offset = ALIGN(y_size, 16); // Required alignment for UV on RK3566
+
+    // Setup fb2 structure for NV12 (single buffer with 2 planes)
     struct drm_mode_fb_cmd2 fb2 = {
             .width  = width,
             .height = height,
             .pixel_format = DRM_FORMAT_NV12,
             .handles = { prime.handle, prime.handle },
-            .pitches = { width, width },// Y and UV both have same stride
-            .offsets = { 0, width * height },// Y at 0, UV after Y
+            .pitches = { y_stride, uv_stride },
+            .offsets = { 0, uv_offset },
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2) < 0) {
         perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2");
-        printf("  handle0=%u handle1=%u pitch0=%u pitch1=%u\n",
-               prime.handle, prime.handle, width, width);
-        printf("  fd=%d\n", dma_fd);
+        fprintf(stderr, "[ DRM ] Failed to add FB2: fd=%d, handle=%u, pitch=%d, offset=%d\n",
+                dma_fd, prime.handle, hor_stride, hor_stride * ver_stride);
         return -1;
     }
 
-#if DRM_DEBUG
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
     printf("[ DRM ] Created framebuffer: fb_id=%u took time: %ld us\n", fb2.fb_id, usec);
-#endif
     return fb2.fb_id;
 }
 
@@ -1232,18 +1237,22 @@ static void rotate_video_pool_cleanup(struct drm_context_t *ctx)
         if (rotate_video_pool.dma_fd[i] > 0) {
             close(rotate_video_pool.dma_fd[i]);
             printf("[ DRM ] Closed video rotate pool DMA FD %d\n", rotate_video_pool.dma_fd[i]);
-            rotate_video_pool.dma_fd[i] = -1;
+            rotate_video_pool.dma_fd[i] = 0;
         }
     }
-    rotate_video_pool.w = 0;
-    rotate_video_pool.h = 0;
+    memset(&rotate_video_pool, 0, sizeof(rotate_video_pool));
 }
 
-static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int height)
+static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int height, int hor_stride, int ver_stride)
 {
-    if (rotate_video_pool.w == width && rotate_video_pool.h == height) return;
+    if (rotate_video_pool.w == width || rotate_video_pool.h == height) return;
+
+    printf("[ DRM ] Initializing video rotate pool, size: %dx%d, stride: %dx%d\n", width, height, hor_stride, ver_stride);
+
     rotate_video_pool.w = width;
     rotate_video_pool.h = height;
+    rotate_video_pool.hor_stride = hor_stride;
+    rotate_video_pool.ver_stride = ver_stride;
     for (int i = 0; i < ROTATE_BUF_COUNT; ++i) {
         if (rotate_video_pool.fb_id[i] > 0) {
             drmModeRmFB(ctx->drm_fd, rotate_video_pool.fb_id[i]);
@@ -1253,9 +1262,10 @@ static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int hei
             close(rotate_video_pool.dma_fd[i]);
             rotate_video_pool.dma_fd[i] = -1;
         }
-        rotate_video_pool.dma_fd[i] = alloc_dmabuf_fd(width * height * 3 / 2);
-        rotate_video_pool.fb_id[i] = drm_prepare_nv12_fb(ctx, rotate_video_pool.dma_fd[i], width, height);
+        rotate_video_pool.dma_fd[i] = alloc_dmabuf_fd(hor_stride * ver_stride * 3 / 2);
+        rotate_video_pool.fb_id[i] = drm_prepare_nv12_fb(ctx, rotate_video_pool.dma_fd[i], width, height, hor_stride, ver_stride);
     }
+    rotate_video_pool.count = 0;
 }
 
 static void video_buf_map_cleanup(struct drm_context_t *ctx)
@@ -1326,37 +1336,45 @@ void *drm_get_next_osd_fb(void)
         return osd_bufs[osd_db.next].buff_addr;
     }
     fprintf(stderr, "[ DRM ] OSD buffer %d is dirty or not available\n", osd_db.next);
+    // force dirty to ensure next frame
+    osd_db.cur ^= 1;
+    osd_db.next ^= 1;
+    osd_db.dirty[osd_db.cur] = 0;
     return NULL;
 }
 
-static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int height, uint32_t* fb_id, int* out_idx)
+static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int height, int hor_stride, int ver_stride)
 {
-    if (rotate_video_pool.w != width || rotate_video_pool.h != height) {
-        rotate_video_pool_init(ctx, width, height);
+    if (rotate_video_pool.w != width || rotate_video_pool.h != height ||
+        rotate_video_pool.hor_stride != hor_stride || rotate_video_pool.ver_stride != ver_stride) {
+        rotate_video_pool_cleanup(ctx); // cleanup old buffers
+        rotate_video_pool_init(ctx, width, height, hor_stride, ver_stride);
         rotate_video_pool.count = 0;
     }
+
     int idx = rotate_video_pool.count;
     rotate_video_pool.count = (rotate_video_pool.count + 1) % ROTATE_BUF_COUNT;
-    if (fb_id) *fb_id = rotate_video_pool.fb_id[idx];
-    if (out_idx) *out_idx = idx;
-    //printf("[ DRM ] Using rotate pool buffer %d for %dx%d rotation\n", idx, width, height);
+    //printf("[ DRM ] Using rotate pool buffer %d for rotation, size %dx%d (stride %dx%d)\n", idx, width, height, hor_stride, ver_stride);
     return rotate_video_pool.dma_fd[idx];
 }
 
-void drm_push_new_video_frame(int dma_fd, int width, int height)
+void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride, int ver_stride)
 {
+    //printf("[ DRM ] New Video Frame, DMA FD: %d, size: %dx%d (stride %dx%d)\n", dma_fd, width, height, hor_stride, ver_stride);
     struct drm_context_t *ctx = drm_get_ctx();
     int need_rotate = (ctx->rotate == 90 || ctx->rotate == 270 || ctx->rotate == 180);
     int out_width = width, out_height = height;
-    int rotated_dma_fd = dma_fd;
-    uint32_t rotated_fb_id = 0;
+    int out_hor_stride = hor_stride, out_ver_stride = ver_stride;
+    int current_dma_fd = -1;
+    int idx = -1;
 
     if (need_rotate) {
         out_width = height;
         out_height = width;
-        int rotate_idx = -1;
-        rotated_dma_fd = get_next_rotate_dma_fd(ctx, out_width, out_height, &rotated_fb_id, &rotate_idx);
-        if (rotated_dma_fd < 0) {
+        out_hor_stride = ver_stride;
+        out_ver_stride = hor_stride;
+        current_dma_fd = get_next_rotate_dma_fd(ctx, out_width, out_height, out_hor_stride, out_ver_stride);
+        if (current_dma_fd < 0) {
             fprintf(stderr, "[ DRM ] All rotate buffers busy, dropping frame!\n");
             return;
         }
@@ -1371,25 +1389,27 @@ void drm_push_new_video_frame(int dma_fd, int width, int height)
             out_height = height;
         }
 
-        int rga_ret = rga_nv12_rotate(
-            dma_fd, rotated_dma_fd, width, height, rotate);
+        // Rotate the current_dma_fd using RGA
+        int rga_ret = rga_nv12_rotate(dma_fd, current_dma_fd, width, height, hor_stride, ver_stride, rotate);
         if (rga_ret != 0) {
-            fprintf(stderr, "[ DRM ] RGA rotation failed, showing non-rotated frame\n");
-            rotated_dma_fd = dma_fd;
-            out_width = width;
-            out_height = height;
-            rotated_fb_id = 0;
+            fprintf(stderr, "[ DRM ] RGA rotation failed\n");
+            rotate_video_pool_cleanup(ctx);
+            rotate_video_pool_init(ctx, width, height, hor_stride, ver_stride);
+            return;
         }
+    } else {
+        current_dma_fd = dma_fd;
     }
 
-    int idx = -1;
+    // Check if we already have this DMA FD in the video buffer map
     for (int i = 0; i < video_buf_map.count; ++i) {
-        if (video_buf_map.dma_fd[i] == rotated_dma_fd) {
+        if (video_buf_map.dma_fd[i] == current_dma_fd) {
             idx = i;
             break;
         }
     }
 
+    // If not found, we need to allocate a new DMA FD buffer
     if (idx < 0) {
         if (video_buf_map.count >= MAX_VIDEO_BUFS) {
             int to_cleanup = (video_buf_map.cur + 1) % MAX_VIDEO_BUFS;
@@ -1406,18 +1426,18 @@ void drm_push_new_video_frame(int dma_fd, int width, int height)
             idx = to_cleanup;
         } else {
             idx = video_buf_map.count++;
-            printf("[ DRM ] Registering new NV12 video buffer at index %d\n", idx);
         }
 
-        uint32_t fb_id = rotated_fb_id;
-        if (!fb_id) {
-            printf("[ DRM ] Registered new NV12 video buffer with fd %d\n", rotated_dma_fd);
-            fb_id = drm_prepare_nv12_fb(ctx, rotated_dma_fd, out_width, out_height);
+        int current_fb_id = drm_prepare_nv12_fb(ctx, current_dma_fd, out_width, out_height, out_hor_stride, out_ver_stride);
+        if (current_fb_id < 0) {
+            printf("[ DRM ] Failed to register new NV12 FB\n");
+            return;
         }
+        printf("[ DRM ] Registered new NV12 video buffer with fd %d\n", current_dma_fd);
         video_buf_map.video_height = out_height;
         video_buf_map.video_width = out_width;
-        video_buf_map.dma_fd[idx] = rotated_dma_fd;
-        video_buf_map.fb_id[idx] = fb_id;
+        video_buf_map.dma_fd[idx] = current_dma_fd;
+        video_buf_map.fb_id[idx] = current_fb_id;
         video_buf_map.dirty[idx] = 1;
     } else {
         video_buf_map.dirty[idx] = 1;
@@ -1450,6 +1470,33 @@ static void fill_black_nv12(uint8_t *buf, int width, int height)
     memset(buf + width * height, 128, width * height / 2);
 }
 
+static void fill_rainbow_nv12(uint8_t *buf, int width, int height)
+{
+    uint8_t *y_plane = buf;
+    uint8_t *uv_plane = buf + width * height;
+
+    // Fill Y plane: horizontal gradient
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            y_plane[y * width + x] = (x * 255) / width;  // gradient in luminance
+        }
+    }
+
+    // Fill UV plane: alternating colorful pattern (each 2x2 block shares 1 UV)
+    for (int y = 0; y < height / 2; ++y) {
+        for (int x = 0; x < width / 2; ++x) {
+            int i = (y * width) + (x * 2); // two bytes per UV sample (U, V)
+
+            // cycle through color hues (this is arbitrary, not real HSV → YUV mapping)
+            uint8_t u = 128 + 50 * sin((float)x / (width / 10.0f));
+            uint8_t v = 128 + 50 * cosf((float)x / (width / 10.0f));
+
+            uv_plane[i] = u; // U
+            uv_plane[i + 1] = v; // V
+        }
+    }
+}
+
 static void* compositor_thread(void* arg)
 {
     struct drm_context_t *ctx = (struct drm_context_t *)arg;
@@ -1471,13 +1518,14 @@ static void* compositor_thread(void* arg)
         int w = ctx->display_info.hdisplay;
         int h = ctx->display_info.vdisplay;
         size_t sz = w * h * 3 / 2;
-        uint8_t *black_nv12 = malloc(sz);
-        fill_black_nv12(black_nv12, w, h);
-        int dma_fd = alloc_nv12_dmabuf_from_ram(black_nv12, w, h);
-        free(black_nv12);
+        uint8_t *buff = malloc(sz);
+        //fill_black_nv12(buff, w, h);
+        fill_rainbow_nv12(buff, w, h); // Maybe add screen saver later
+        int dma_fd = alloc_nv12_dmabuf_from_ram(buff, w, h);
+        free(buff);
         if (dma_fd >= 0) {
             video_buf_map.dma_fd[0] = dma_fd;
-            video_buf_map.fb_id[0] = drm_prepare_nv12_fb(ctx, dma_fd, w, h);
+            video_buf_map.fb_id[0] = drm_prepare_nv12_fb(ctx, dma_fd, w, h, w, h);
             video_buf_map.video_width = w;
             video_buf_map.video_height = h;
             video_buf_map.count = 1;
@@ -1525,7 +1573,7 @@ struct drm_context_t *drm_get_ctx(void)
 
 static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation)
 {
-#if DRM_DEBUG
+#if DRM_DEBUG_ROTATE
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
 #endif
@@ -1557,7 +1605,7 @@ static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_he
     releasebuffer_handle(src_handle);
     releasebuffer_handle(dst_handle);
 
-#if DRM_DEBUG
+#if DRM_DEBUG_ROTATE
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
     double ms = usec / 1000.0;
@@ -1566,9 +1614,9 @@ static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_he
     return 0;
 }
 
-static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation)
+static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int wstride, int hstride, int rotation)
 {
-#if DRM_DEBUG
+#if DRM_DEBUG_ROTATE
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
 #endif
@@ -1595,17 +1643,23 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
         return -1;
     }
 
-    rga_buffer_t src = wrapbuffer_handle(src_handle, src_width, src_height, RK_FORMAT_YCbCr_420_SP);
-    rga_buffer_t dst = wrapbuffer_handle(dst_handle, src_height, src_width, RK_FORMAT_YCbCr_420_SP);
+    const rga_buffer_t src = wrapbuffer_handle_t(src_handle, src_width, src_height, wstride, hstride, RK_FORMAT_YCbCr_420_SP);
+    const rga_buffer_t dst = wrapbuffer_handle_t(dst_handle, src_height, src_width, hstride, wstride, RK_FORMAT_YCbCr_420_SP);
 
     // rotate the image using RGA
-    imrotate(src, dst, rotation);
+    int ret = imrotate(src, dst, rotation);
+    if (ret != IM_STATUS_SUCCESS) {
+        printf("Error: imrotate failed: %d\n", ret);
+        releasebuffer_handle(src_handle);
+        releasebuffer_handle(dst_handle);
+        return -1;
+    }
 
     // Release RGA handles, do not close dma_fd here!
     releasebuffer_handle(src_handle);
     releasebuffer_handle(dst_handle);
 
-#if DRM_DEBUG
+#if DRM_DEBUG_ROTATE
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
     double ms = usec / 1000.0;
