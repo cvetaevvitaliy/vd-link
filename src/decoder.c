@@ -180,7 +180,7 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
     video_frame_info.width = w;
     video_frame_info.height = h;
     video_frame_info.fmt = format;
-    video_frame_info.size = video_frame_info.size * 2;
+    video_frame_info.size = video_frame_info.size;
 
     // Free old buffer group if exists
     if (frm_grp) {
@@ -261,6 +261,7 @@ static void* decoder_thread_func(void* arg)
                 // For DMA-HEAP buffers
                 decoder_buff_init_dma_heap(width, height, fmt);
                 mpp_frame_deinit(&frame);
+                first_frames = 0;
 
             } else if (mpp_frame_get_eos(frame)) {
                 // End-of-stream received: stop decoding loop
@@ -278,14 +279,16 @@ static void* decoder_thread_func(void* arg)
                 // Frame is ready for rendering, DRM, or further processing
                 int width = (int)mpp_frame_get_width(frame);
                 int height = (int)mpp_frame_get_height(frame);
+                int ver_stride = (int)mpp_frame_get_ver_stride(frame);
+                int hor_stride = (int)mpp_frame_get_hor_stride(frame);
                 int dma_fd = mpp_buffer_get_fd(mpp_frame_get_buffer(frame));
                 struct dma_buf_sync sync;
                 sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE;
                 ioctl(dma_fd, DMA_BUF_IOCTL_SYNC, &sync);
 #if DECODER_DEBUG
-                printf("[ DECODER ] Frame ready: %dx%d, dma_fd=%d\n", width, height, dma_fd);
+                printf("[ DECODER ] Frame ready: %dx%d, stride(%dx%d) dma_fd=%d\n", width, height, hor_stride, ver_stride, dma_fd);
 #endif
-                drm_push_new_video_frame(dma_fd, width, height);
+                drm_push_new_video_frame(dma_fd, width, height, hor_stride, ver_stride);
                 mpp_frame_deinit(&frame);
 
                 // FPS calculation block
