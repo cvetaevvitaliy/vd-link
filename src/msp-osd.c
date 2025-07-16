@@ -58,7 +58,7 @@ static atomic_int running = 0;
 static char current_fc_variant[5] = "BTFL";
 static bool fc_variant_loaded = false;
 
-#define SPLASH_STRING "OSD WAITING..."
+#define SPLASH_STRING   "OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
 
 #define MAX_DISPLAY_X 53
@@ -66,7 +66,7 @@ static bool fc_variant_loaded = false;
 
 #define BYTES_PER_PIXEL 4
 
-#define MSP_PORT 14555
+#define MSP_PORT        14555
 #define MSP_BUFFER_SIZE 1400
 
 static int display_width = 0;
@@ -76,10 +76,10 @@ static int rotation = 0; // 0, 90, 180, 270
 static uint16_t msp_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t overlay_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
-static displayport_vtable_t *display_driver;
+static displayport_vtable_t* display_driver;
 struct timespec last_render;
 static atomic_bool msp_draw_active = false;
-static struct timespec last_msp_draw = {0};
+static struct timespec last_msp_draw = { 0 };
 static volatile bool need_render = false;
 
 static void need_render_display(void);
@@ -87,7 +87,6 @@ static void load_fonts(char* font_variant);
 static void close_all_fonts(void);
 
 static int msp_sock = -1;
-
 
 // TODO: add support for different display modes FULL HD, HD, SD, etc.
 static display_info_t sd_display_info = {
@@ -97,7 +96,7 @@ static display_info_t sd_display_info = {
     .font_height = 54,
     .x_offset = 0,
     .y_offset = 0,
-    .fonts = {NULL, NULL, NULL, NULL},
+    .fonts = { NULL, NULL, NULL, NULL },
 };
 
 static display_info_t full_display_info = {
@@ -107,7 +106,7 @@ static display_info_t full_display_info = {
     .font_height = 36,
     .x_offset = 0,
     .y_offset = 0,
-    .fonts = {NULL, NULL, NULL, NULL},
+    .fonts = { NULL, NULL, NULL, NULL },
 };
 
 static display_info_t hd_display_info = {
@@ -117,7 +116,7 @@ static display_info_t hd_display_info = {
     .font_height = 36,
     .x_offset = 5,
     .y_offset = 0,
-    .fonts = {NULL, NULL, NULL, NULL},
+    .fonts = { NULL, NULL, NULL, NULL },
 };
 
 static display_info_t overlay_display_info = {
@@ -127,7 +126,7 @@ static display_info_t overlay_display_info = {
     .font_height = 36,
     .x_offset = 5,
     .y_offset = 0,
-    .fonts = {NULL, NULL, NULL, NULL},
+    .fonts = { NULL, NULL, NULL, NULL },
 };
 
 static enum display_mode_s {
@@ -136,9 +135,10 @@ static enum display_mode_s {
     DISPLAY_WAITING = 2
 } display_mode = DISPLAY_RUNNING;
 
-static display_info_t *current_display_info;
+static display_info_t* current_display_info;
 
-static void draw_character(display_info_t *display_info, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y], uint32_t x, uint32_t y, uint16_t c)
+static void draw_character(display_info_t* display_info, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y],
+                           uint32_t x, uint32_t y, uint16_t c)
 {
     if ((x > (display_info->char_width - 1)) || (y > (display_info->char_height - 1))) {
         return;
@@ -146,9 +146,9 @@ static void draw_character(display_info_t *display_info, uint16_t character_map[
     character_map[x][y] = c;
 }
 
-static void display_print_string(uint8_t init_x, uint8_t y, const char *string, uint8_t len)
+static void display_print_string(uint8_t init_x, uint8_t y, const char* string, uint8_t len)
 {
-    for(uint8_t x = 0; x < len; x++) {
+    for (uint8_t x = 0; x < len; x++) {
         draw_character(&overlay_display_info, overlay_character_map, x + init_x, y, string[x]);
     }
 }
@@ -166,7 +166,7 @@ static void msp_clear_screen(void)
 
 static void clear_framebuffer(void)
 {
-    void *fb_addr = drm_get_next_osd_fb();
+    void* fb_addr = drm_get_next_osd_fb();
     if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
@@ -175,7 +175,8 @@ static void clear_framebuffer(void)
     memset(fb_addr, 0, display_width * display_height * BYTES_PER_PIXEL);
 }
 
-static void draw_character_map(display_info_t *display_info, void* restrict fb_addr, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
+static void draw_character_map(display_info_t* display_info, void* restrict fb_addr,
+                               uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
 {
     if (display_info->fonts[0] == NULL) {
         DEBUG_PRINT("No font available, failed to draw.\n");
@@ -219,12 +220,14 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
     for (int y = 0; y < display_info->char_height; y++) {
         for (int x = 0; x < display_info->char_width; x++) {
             uint16_t c = character_map[x][y];
-            if (c == 0) continue;
+            if (c == 0)
+                continue;
 
             int page = (c & 0x300) >> 8;
             c = c & 0xFF;
             void* font = display_info->fonts[page];
-            if (!font) font = display_info->fonts[0];
+            if (!font)
+                font = display_info->fonts[0];
 
             uint32_t src_x = x * display_info->font_width + x_offset;
             uint32_t src_y = y * display_info->font_height + y_offset;
@@ -258,15 +261,18 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
                         break;
                     }
 
-                    if (rx < 0 || ry < 0 || rx >= fb_w || ry >= fb_h) continue;
+                    if (rx < 0 || ry < 0 || rx >= fb_w || ry >= fb_h)
+                        continue;
 
                     uint32_t fb_offset = (ry * fb_w + rx) * BYTES_PER_PIXEL;
-                    uint32_t font_offset = (((display_info->font_height * display_info->font_width) * BYTES_PER_PIXEL) * c) + (gy * display_info->font_width + gx) * BYTES_PER_PIXEL;
+                    uint32_t font_offset =
+                        (((display_info->font_height * display_info->font_width) * BYTES_PER_PIXEL) * c) +
+                        (gy * display_info->font_width + gx) * BYTES_PER_PIXEL;
 
-                    *((uint8_t *)fb_addr + fb_offset + 0) = *((uint8_t *)font + font_offset + 2); // B
-                    *((uint8_t *)fb_addr + fb_offset + 1) = *((uint8_t *)font + font_offset + 1); // G
-                    *((uint8_t *)fb_addr + fb_offset + 2) = *((uint8_t *)font + font_offset + 0); // R
-                    *((uint8_t *)fb_addr + fb_offset + 3) = *((uint8_t *)font + font_offset + 3); // A
+                    *((uint8_t*)fb_addr + fb_offset + 0) = *((uint8_t*)font + font_offset + 2); // B
+                    *((uint8_t*)fb_addr + fb_offset + 1) = *((uint8_t*)font + font_offset + 1); // G
+                    *((uint8_t*)fb_addr + fb_offset + 2) = *((uint8_t*)font + font_offset + 0); // R
+                    *((uint8_t*)fb_addr + fb_offset + 3) = *((uint8_t*)font + font_offset + 3); // A
                 }
             }
         }
@@ -277,8 +283,8 @@ static void draw_screen(void)
 {
     clear_framebuffer();
 
-    void *fb_addr = drm_get_next_osd_fb();
-    if (fb_addr== NULL) {
+    void* fb_addr = drm_get_next_osd_fb();
+    if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
     }
@@ -329,11 +335,13 @@ static void start_display(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
     memset(overlay_character_map, 0, sizeof(overlay_character_map));
 
-    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
+    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING,
+                         sizeof(SPLASH_STRING));
     msp_draw_complete();
 }
 
-static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
+static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd)
+{
     msp_clear_screen();
 
     switch (is_hd) {
@@ -352,7 +360,7 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
     }
 }
 
-static void msp_callback(msp_msg_t *msp_message)
+static void msp_callback(msp_msg_t* msp_message)
 {
     if (msp_message->cmd == MSP_CMD_FC_VARIANT && !fc_variant_loaded) {
         if (msp_message->size >= 4) {
@@ -361,18 +369,16 @@ static void msp_callback(msp_msg_t *msp_message)
             new_variant[4] = '\0';
 
             if (strncmp(current_fc_variant, new_variant, 4) != 0) {
-
                 strcpy(current_fc_variant, new_variant);
                 close_all_fonts();
 
-                if (strcmp(new_variant, "BTFL") == 0 ||
-                    strcmp(new_variant, "INAV") == 0 ||
+                if (strcmp(new_variant, "BTFL") == 0 || strcmp(new_variant, "INAV") == 0 ||
                     strcmp(new_variant, "ARDU") == 0) {
                     load_fonts(current_fc_variant);
                 } else {
                     load_fonts("btfl");
                 }
-                
+
                 printf("[ MSP OSD ] Detected FC VARIANT: %s\n", new_variant);
             }
             fc_variant_loaded = true;
@@ -418,39 +424,35 @@ void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_D
 
 #define CHAR_LINK_LQ "\x7B"
 #define CHAR_LINK_BW "\x70"
-void wfb_status_link_callback(const wfb_rx_status *st)
+void wfb_status_link_callback(const wfb_rx_status* st)
 {
     char str[128];
     int len = 0;
     if (st->ants_count > 0) {
         memset(overlay_character_map, 0, sizeof(overlay_character_map));
         // freq, link quality symbol, rssi_avg, bitrate
-        len = snprintf(str, sizeof(str), "%d " CHAR_LINK_BW "%.1f " CHAR_LINK_LQ "%d",
-                       (int)st->ants[0].freq,
-                       st->ants[0].bitrate_mbps,
-                       (int)st->ants[0].rssi_avg);
+        len = snprintf(str, sizeof(str), "%d " CHAR_LINK_BW "%.1f " CHAR_LINK_LQ "%d", (int)st->ants[0].freq,
+                       st->ants[0].bitrate_mbps, (int)st->ants[0].rssi_avg);
 
         for (int i = 1; i < st->ants_count; ++i) {
             // Additional antennas, only RSSI
-            int l = snprintf(str + len, sizeof(str) - len,
-                             " " CHAR_LINK_LQ "%d", (int)st->ants[i].rssi_avg);
-            if (l > 0 && l < (int)(sizeof(str) - len)) len += l;
+            int l = snprintf(str + len, sizeof(str) - len, " " CHAR_LINK_LQ "%d", (int)st->ants[i].rssi_avg);
+            if (l > 0 && l < (int)(sizeof(str) - len))
+                len += l;
         }
         display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
         if (!atomic_load(&msp_draw_active)) {
-           need_render_display();
+            need_render_display();
         }
     }
 
 #if DEBUG_PRINT_LINK
     for (int i = 0; i < st->ants_count; ++i) {
-        printf("[MSP OSD] WFB status link ant[%d]: freq=%lld mcs=%lld bw=%lld ant_id=%lld pkt_delta=%lld bitrate=%.1f rssi=[%lld/%lld/%lld] snr=[%lld/%lld/%lld]\n",
-               i,
-               st->ants[i].freq, st->ants[i].mcs, st->ants[i].bw, st->ants[i].ant_id,
-               st->ants[i].pkt_delta,
-               st->ants[i].bitrate_mbps,
-               st->ants[i].rssi_min, st->ants[i].rssi_avg, st->ants[i].rssi_max,
-               st->ants[i].snr_min, st->ants[i].snr_avg, st->ants[i].snr_max);
+        printf(
+            "[MSP OSD] WFB status link ant[%d]: freq=%lld mcs=%lld bw=%lld ant_id=%lld pkt_delta=%lld bitrate=%.1f rssi=[%lld/%lld/%lld] snr=[%lld/%lld/%lld]\n",
+            i, st->ants[i].freq, st->ants[i].mcs, st->ants[i].bw, st->ants[i].ant_id, st->ants[i].pkt_delta,
+            st->ants[i].bitrate_mbps, st->ants[i].rssi_min, st->ants[i].rssi_avg, st->ants[i].rssi_max,
+            st->ants[i].snr_min, st->ants[i].snr_avg, st->ants[i].snr_max);
     }
 #endif
 }
@@ -463,9 +465,9 @@ static void need_render_display(void)
     need_render = true;
 }
 
-static void* msp_osd_thread(void *arg)
+static void* msp_osd_thread(void* arg)
 {
-    struct config_t *cfg = (struct config_t *)arg;
+    struct config_t* cfg = (struct config_t*)arg;
     printf("[ MSP OSD ] Starting MSP OSD thread\n");
 
     if (drm_get_osd_frame_size(&display_width, &display_height, &rotation) < 0) {
@@ -478,7 +480,7 @@ static void* msp_osd_thread(void *arg)
         printf("[ MSP OSD ] Failed to bind UDP socket on port %d\n", MSP_PORT);
         return NULL;
     }
-    
+
     printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
 
     toast_load_config();
@@ -493,7 +495,7 @@ static void* msp_osd_thread(void *arg)
     display_driver->draw_complete = &msp_draw_complete;
     display_driver->set_options = &msp_set_options;
 
-    msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
+    msp_state_t* msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
 
     load_fonts(current_fc_variant);
@@ -503,7 +505,7 @@ static void* msp_osd_thread(void *arg)
 
     wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
 
-#if 0    // test all characters
+#if 0 // test all characters
     uint8_t c = 0;
     for (int j = 0; j < MAX_DISPLAY_Y; ++j) {
         for (int i = 0; i < MAX_DISPLAY_X; ++i) {
@@ -517,11 +519,7 @@ static void* msp_osd_thread(void *arg)
     msp_draw_complete();
 #endif
     while (atomic_load(&running)) {
-
-        struct pollfd pfd = {
-            .fd = msp_sock,
-            .events = POLLIN
-        };
+        struct pollfd pfd = { .fd = msp_sock, .events = POLLIN };
 
         if (poll(&pfd, 1, 100) > 0 && (pfd.revents & POLLIN)) {
             uint8_t buf[MSP_BUFFER_SIZE];
@@ -532,7 +530,6 @@ static void* msp_osd_thread(void *arg)
                 }
             }
         }
-
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
 
@@ -545,7 +542,7 @@ static void* msp_osd_thread(void *arg)
             fc_variant_loaded = false;
         }
 
-        if(need_render) {
+        if (need_render) {
             render_screen();
         }
     }
@@ -563,7 +560,7 @@ static void* msp_osd_thread(void *arg)
     return NULL;
 }
 
-int msp_osd_init(struct config_t *cfg)
+int msp_osd_init(struct config_t* cfg)
 {
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
@@ -571,7 +568,6 @@ int msp_osd_init(struct config_t *cfg)
         return -1;
     }
     return pthread_create(&msp_thread, NULL, msp_osd_thread, cfg);
-
 }
 
 void msp_osd_stop(void)
