@@ -36,6 +36,8 @@
 #include <bits/pthreadtypes.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <poll.h>
 #include "msp-osd.h"
 #include "msp/msp.h"
 #include "msp/msp_displayport.h"
@@ -46,13 +48,15 @@
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
+#include "net/network.h"
 
 #define DEBUG_PRINT_LINK 0
 
 static pthread_t msp_thread;
 static atomic_int running = 0;
 
-static char current_fc_variant[5];
+static char current_fc_variant[5] = "BTFL";
+static bool fc_variant_loaded = false;
 
 #define SPLASH_STRING "OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
@@ -61,6 +65,9 @@ static char current_fc_variant[5];
 #define MAX_DISPLAY_Y 20
 
 #define BYTES_PER_PIXEL 4
+
+#define MSP_PORT 14555
+#define MSP_BUFFER_SIZE 1400
 
 static int display_width = 0;
 static int display_height = 0;
@@ -71,12 +78,16 @@ static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t overlay_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static displayport_vtable_t *display_driver;
 struct timespec last_render;
+static atomic_bool msp_draw_active = false;
+static struct timespec last_msp_draw = {0};
 static volatile bool need_render = false;
 
-static void render_display(void);
 static void need_render_display(void);
+static void load_fonts(char* font_variant);
+static void close_all_fonts(void);
 
-static char current_fc_variant[5];
+static int msp_sock = -1;
+
 
 // TODO: add support for different display modes FULL HD, HD, SD, etc.
 static display_info_t sd_display_info = {
@@ -272,30 +283,44 @@ static void draw_screen(void)
         return;
     }
 
-    if (fakehd_is_enabled()) {
-        fakehd_map_sd_character_map_to_hd(msp_character_map, msp_render_character_map);
-        draw_character_map(current_display_info, fb_addr, msp_render_character_map);
-    } else {
-        draw_character_map(current_display_info, fb_addr, msp_character_map);
+    if (fc_variant_loaded) {
+        if (fakehd_is_enabled()) {
+            fakehd_map_sd_character_map_to_hd(msp_character_map, msp_render_character_map);
+            draw_character_map(current_display_info, fb_addr, msp_render_character_map);
+        } else {
+            draw_character_map(current_display_info, fb_addr, msp_character_map);
+        }
     }
     draw_character_map(&overlay_display_info, fb_addr, overlay_character_map);
 }
 
 static void render_screen(void)
 {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    double dt = (now.tv_sec - last_render.tv_sec) + (now.tv_nsec - last_render.tv_nsec) / 1e9;
+    need_render = false;
+
+    if (dt < 0.2) { // Allow OSD refresh rate to be maximum 5 Hz
+        return;
+    }
+
     draw_screen();
+
     if (display_mode == DISPLAY_DISABLED) {
         clear_framebuffer();
     }
+
     drm_push_new_osd_frame();
-    //DEBUG_PRINT("drew a frame\n");
     clock_gettime(CLOCK_MONOTONIC, &last_render);
 }
-
 
 static void msp_draw_complete(void)
 {
     render_screen();
+    atomic_store(&msp_draw_active, true);
+    clock_gettime(CLOCK_MONOTONIC, &last_msp_draw);
 }
 
 static void start_display(void)
@@ -329,7 +354,35 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
 
 static void msp_callback(msp_msg_t *msp_message)
 {
-    displayport_process_message(display_driver, msp_message);
+    if (msp_message->cmd == MSP_CMD_FC_VARIANT && !fc_variant_loaded) {
+        if (msp_message->size >= 4) {
+            char new_variant[5];
+            memcpy(new_variant, msp_message->payload, 4);
+            new_variant[4] = '\0';
+
+            if (strncmp(current_fc_variant, new_variant, 4) != 0) {
+
+                strcpy(current_fc_variant, new_variant);
+                close_all_fonts();
+
+                if (strcmp(new_variant, "BTFL") == 0 ||
+                    strcmp(new_variant, "INAV") == 0 ||
+                    strcmp(new_variant, "ARDU") == 0) {
+                    load_fonts(current_fc_variant);
+                } else {
+                    load_fonts("btfl");
+                }
+                
+                printf("[ MSP OSD ] Detected FC VARIANT: %s\n", new_variant);
+            }
+            fc_variant_loaded = true;
+        }
+        return;
+    }
+
+    if (msp_message->cmd == MSP_CMD_DISPLAYPORT) {
+        displayport_process_message(display_driver, msp_message);
+    }
 }
 
 static void load_fonts(char* font_variant)
@@ -340,7 +393,7 @@ static void load_fonts(char* font_variant)
     load_font(&sd_display_info, font_variant);
     load_font(&hd_display_info, font_variant);
     load_font(&full_display_info, font_variant);
-    load_font(&overlay_display_info, font_variant);
+    load_font(&overlay_display_info, "btfl");
 }
 
 static void close_all_fonts(void)
@@ -384,7 +437,9 @@ void wfb_status_link_callback(const wfb_rx_status *st)
             if (l > 0 && l < (int)(sizeof(str) - len)) len += l;
         }
         display_print_string(0, MAX_DISPLAY_Y - 1, str, strlen(str));
-        need_render_display();  // TODO: need to synchronize with MSP data draw_complete
+        if (!atomic_load(&msp_draw_active)) {
+           need_render_display();
+        }
     }
 
 #if DEBUG_PRINT_LINK
@@ -406,13 +461,6 @@ static void need_render_display(void)
         return; // already scheduled
     }
     need_render = true;
-    clock_gettime(CLOCK_MONOTONIC, &last_render);
-}
-
-static void render_display(void)
-{
-    msp_draw_complete();
-    need_render = false;
 }
 
 static void* msp_osd_thread(void *arg)
@@ -424,9 +472,14 @@ static void* msp_osd_thread(void *arg)
         printf("[ MSP OSD ] Failed to get OSD frame size\n");
         return NULL;
     }
-    printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
 
-    memset(current_fc_variant, 0, sizeof(current_fc_variant));
+    msp_sock = bind_socket(MSP_PORT);
+    if (msp_sock < 0) {
+        printf("[ MSP OSD ] Failed to bind UDP socket on port %d\n", MSP_PORT);
+        return NULL;
+    }
+    
+    printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
 
     toast_load_config();
     load_fakehd_config();
@@ -443,7 +496,7 @@ static void* msp_osd_thread(void *arg)
     msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
 
-    load_fonts("btfl");
+    load_fonts(current_fc_variant);
 
     start_display();
     usleep(100000);
@@ -464,15 +517,42 @@ static void* msp_osd_thread(void *arg)
     msp_draw_complete();
 #endif
     while (atomic_load(&running)) {
-        // noting now
-        if(need_render) {
-            render_display();
+
+        struct pollfd pfd = {
+            .fd = msp_sock,
+            .events = POLLIN
+        };
+
+        if (poll(&pfd, 1, 100) > 0 && (pfd.revents & POLLIN)) {
+            uint8_t buf[MSP_BUFFER_SIZE];
+            ssize_t n = recv(msp_sock, buf, sizeof(buf), 0);
+            if (n > 0) {
+                for (ssize_t i = 0; i < n; i++) {
+                    msp_process_data(msp_state, buf[i]);
+                }
+            }
         }
-        usleep(10000);
+
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+
+        double dt = (now.tv_sec - last_msp_draw.tv_sec) + (now.tv_nsec - last_msp_draw.tv_nsec) / 1e9;
+        if (dt > 1) {
+            atomic_store(&msp_draw_active, false);
+        }
+
+        if (dt > 5) {
+            fc_variant_loaded = false;
+        }
+
+        if(need_render) {
+            render_screen();
+        }
     }
 
     wfb_status_link_stop();
 
+    close(msp_sock);
     free(display_driver);
     free(msp_state);
 

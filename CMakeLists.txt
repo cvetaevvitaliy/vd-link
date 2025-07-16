@@ -54,7 +54,7 @@ set(MSP_OSD_SRC
         src/msp-osd/lz4/lz4.c
         src/msp-osd/msp/msp.c
         src/msp-osd/msp/msp_displayport.c
-#        src/msp-osd/net/network.c
+        src/msp-osd/net/network.c
 #        src/msp-osd/net/serial.c
 #        src/msp-osd/rec/rec.c
 #        src/msp-osd/rec/rec_pb.c
