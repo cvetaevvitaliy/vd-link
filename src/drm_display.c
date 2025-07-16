@@ -1350,6 +1350,7 @@ static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int heig
         rotate_video_pool_cleanup(ctx); // cleanup old buffers
         rotate_video_pool_init(ctx, width, height, hor_stride, ver_stride);
         rotate_video_pool.count = 0;
+        video_buf_map.count = 0; // Reset video buffer map
     }
 
     int idx = rotate_video_pool.count;
