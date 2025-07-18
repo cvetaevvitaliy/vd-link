@@ -1,5 +1,6 @@
-#include "interface_lvgl.h"
+#include "ui_interface.h"
 #include "compositor.h"
+#include "menu.h"
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -93,6 +94,10 @@ static void* joystick_reader_thread(void* arg)
                     }
                     printf("[ JOYSTICK ] Button %d (%s) pressed\n", 
                            event.number, current_button_text);
+                    
+                    // Handle menu navigation
+                    menu_handle_navigation(event.number);
+                    
                 } else { // Button released
                     strcpy(current_button_text, "none");
                     printf("[ JOYSTICK ] Button %d released\n", event.number);
@@ -103,9 +108,14 @@ static void* joystick_reader_thread(void* arg)
                     lv_label_set_text(ui_elements.curr_button, current_button_text);
                 }
             } else if (event.type == JS_EVENT_AXIS) {
-                // Handle axis movement if needed
-                printf("[ JOYSTICK ] Axis %d moved to %d\n", event.number, event.value);
-                if (ui_elements.curr_button) {
+                // Handle axis movement for menu navigation
+                if (menu_is_visible()) {
+                    // Use the new menu system for axis handling
+                    // This could be implemented in menu.c if needed
+                }
+                
+                // Update UI with axis info
+                if (ui_elements.curr_button && !menu_is_visible()) {
                     lv_label_set_text_fmt(ui_elements.curr_button, "Axis: %d : %d", 
                                           event.number, event.value);
                 }
@@ -215,11 +225,6 @@ static void update_battery_charge(lv_timer_t *t)
         fclose(capacity_file);
     }
 
-    // Update both battery elements if they exist
-    if (ui_elements.battery) {
-        lv_label_set_text_fmt(ui_elements.battery, " %d%%", capacity);
-    }
-    
     if (ui_elements.battery_charge) {
         char* charge_symbol = LV_SYMBOL_BATTERY_EMPTY;
         if (status[0] == 'C' /* Charging */) {
@@ -237,7 +242,7 @@ static void update_battery_charge(lv_timer_t *t)
                 charge_symbol = LV_SYMBOL_BATTERY_EMPTY;
             }
         }
-        lv_label_set_text(ui_elements.battery_charge, charge_symbol);
+        lv_label_set_text_fmt(ui_elements.battery_charge, "%s %d%%", charge_symbol, capacity);
     }
 
     // Force full area refresh for left side elements
@@ -605,21 +610,12 @@ void lvgl_create_ui(void)
 
     // Battery indicator (top left)
     ui_elements.battery_charge = lv_label_create(top_bar);
-    lv_label_set_text(ui_elements.battery_charge, "_");
+    lv_label_set_text(ui_elements.battery_charge, "_ ?%%");
     lv_obj_set_style_text_font(ui_elements.battery_charge, default_font, LV_PART_MAIN);
     lv_obj_align(ui_elements.battery_charge, LV_ALIGN_LEFT_MID, 15, 0);
     lv_obj_set_style_text_color(ui_elements.battery_charge, lv_color_make(0, 255, 0), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui_elements.battery_charge, LV_OPA_TRANSP, LV_PART_MAIN); // Make label background transparent
 
-    // Battery percentage indicator (top left)
-    ui_elements.battery = lv_label_create(top_bar);
-    lv_label_set_text(ui_elements.battery, "BAT: 0%");
-    lv_obj_set_style_text_font(ui_elements.battery, default_font, LV_PART_MAIN); // Example: Set font size to 16
-    lv_obj_align(ui_elements.battery, LV_ALIGN_LEFT_MID, 30, 0);
-    lv_obj_set_style_text_color(ui_elements.battery, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(ui_elements.battery, LV_OPA_TRANSP, LV_PART_MAIN); // Make label background transparent
-
-    // Create only one timer for battery update
     create_tracked_timer(update_battery_charge, 1000, NULL);
 
     // Signal strength (top center-right)
@@ -677,4 +673,33 @@ void lvgl_create_ui(void)
     printf("[ LVGL ] Drone HUD UI created successfully\n");
     pthread_mutex_unlock(&lvgl_mutex);
 
+    lvgl_create_menu();
+
+}
+
+void lvgl_create_menu()
+{
+    pthread_mutex_lock(&lvgl_mutex);
+
+    printf("[ LVGL ] Creating menu UI...\n");
+
+    // Check if display is initialized
+    if (!disp) {
+        printf("[ LVGL ] Display not initialized, cannot create menu UI\n");
+        pthread_mutex_unlock(&lvgl_mutex);
+        return;
+    }
+
+    // Get the screen dimensions from our registered display
+    lv_coord_t width = lv_disp_get_hor_res(disp);
+    lv_coord_t height = lv_disp_get_ver_res(disp);
+
+    printf("[ LVGL ] Initializing menu\n");
+    
+    // Initialize and create menu
+    menu_init();
+    menu_create_ui();
+    
+    printf("[ LVGL ] Menu initialized successfully\n");
+    pthread_mutex_unlock(&lvgl_mutex);
 }

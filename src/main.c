@@ -35,7 +35,7 @@
 #include "src/rtp_receiver.h"
 #include "src/common.h"
 #include "src/drm_display.h"
-#include "src/ui_interface/interface_lvgl.h"
+#include "ui_interface.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
 

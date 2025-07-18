@@ -94,8 +94,9 @@ add_executable(${PROJECT_NAME}
         src/decoder.c
         src/msp-osd.c
         src/wfb_status_link.c
-        src/ui_interface/interface_lvgl.c
+        src/ui_interface/ui_interface.c
         src/ui_interface/compositor.c
+        src/ui_interface/menu.c
 )
 
 target_link_libraries(${PROJECT_NAME} m rtp pthread

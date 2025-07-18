@@ -32,6 +32,12 @@ void ui_interface_deinit(void);
 void lvgl_create_ui(void);
 
 /**
+ * Create a menu UI
+ * This function sets up the main menu interface for the application
+ */
+void lvgl_create_menu();
+
+/**
  * Update the UI with the current WFB status
  * @param st Pointer to the WFB status structure
  */
