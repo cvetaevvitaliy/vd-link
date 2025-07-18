@@ -26,42 +26,102 @@ static int ui_rotation = 0;
 
 // Structure for drone telemetry animation
 typedef struct {
-    lv_obj_t *alt_value;
-    lv_obj_t *speed_value;
-    lv_obj_t *throttle_label;
-    int alt_counter;
-    int speed_counter;
-    int throttle_counter;
-} drone_telemetry_t;
+    lv_obj_t *signal;
+    lv_obj_t *bitrate;
+    lv_obj_t *battery_charge;
+    lv_obj_t *battery;  // Battery percentage label
+    lv_obj_t *clock;   // Clock label
+    lv_obj_t *curr_button; // Current button label
+} ui_elements_t;
+
+typedef struct {
+    int signal;
+    int battery;
+    bool battery_charging;
+} ui_values_t;
+
+ui_elements_t ui_elements = {0};
+ui_values_t ui_values = {0};
 
 /**
  * Update drone telemetry values
  */
-static void update_drone_telemetry(lv_timer_t *t)
+void ui_update_wfb_ng_telemetry(const wfb_rx_status *st)
 {
-    drone_telemetry_t *data = (drone_telemetry_t *)t->user_data;
-    if (!data) return;
+    if (!st) return;
+
+    if (st->id[0] != 'v') return; // id could be "video rx", "msposd rx", "mavlink rx". We need only "video rx" telemetry
+
+    // Update RSSI
+    if (ui_elements.signal) {
+        lv_label_set_text_fmt(ui_elements.signal, "RSSI: %d dBm", st->ants[0].rssi_avg);
+    }
+
+    // Update bitrate
+    if (ui_elements.bitrate) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%s %.2f Mbps", LV_SYMBOL_WIFI, st->ants[0].bitrate_mbps);
+        lv_label_set_text(ui_elements.bitrate, buf);
+    }
+}
+
+static void update_battery_charge(lv_timer_t *t)
+{
+    int capacity = 0;
+    char status[32] = "Unknown";
     
-    // Update altitude (simulate slowly changing altitude)
-    data->alt_counter++;
-    float altitude = 125.0f + sin(data->alt_counter * 0.05f) * 10.0f;
-    char alt_buf[16];
-    snprintf(alt_buf, sizeof(alt_buf), "%.1fm", altitude);
-    if (data->alt_value) lv_label_set_text(data->alt_value, alt_buf);
+    // Read battery status
+    FILE *status_file = fopen("/sys/class/power_supply/battery/status", "r");
+    if (!status_file) {
+        perror("Failed to open battery status file");
+    } else {
+        /* Status could be: Charging, Discharging, Full */
+        if (fgets(status, sizeof(status), status_file)) {
+            status[strcspn(status, "\n")] = '\0'; // Remove newline character
+        }
+        fclose(status_file);
+    }
+
+    // Read battery capacity
+    FILE *capacity_file = fopen("/sys/class/power_supply/battery/capacity", "r");
+    if (!capacity_file) {
+        perror("Failed to open battery capacity file");
+    } else {
+        if (fscanf(capacity_file, "%d", &capacity) == 1) {
+            ui_values.battery = capacity; // Update battery percentage
+        } else {
+            fprintf(stderr, "Failed to read battery capacity\n");
+        }
+        fclose(capacity_file);
+    }
+
+    // Update both battery elements if they exist
+    if (ui_elements.battery) {
+        lv_label_set_text_fmt(ui_elements.battery, " %d%%", capacity);
+    }
     
-    // Update speed (simulate varying speed)
-    data->speed_counter++;
-    float speed = 15.0f + sin(data->speed_counter * 0.08f) * 5.0f;
-    char speed_buf[16];
-    snprintf(speed_buf, sizeof(speed_buf), "%.1fm/s", speed);
-    if (data->speed_value) lv_label_set_text(data->speed_value, speed_buf);
-    
-    // Update throttle
-    data->throttle_counter++;
-    int throttle = 65 + (int)(sin(data->throttle_counter * 0.03f) * 20);
-    char throttle_buf[16];
-    snprintf(throttle_buf, sizeof(throttle_buf), "THR: %d%%", throttle);
-    if (data->throttle_label) lv_label_set_text(data->throttle_label, throttle_buf);
+    if (ui_elements.battery_charge) {
+        char* charge_symbol = LV_SYMBOL_BATTERY_EMPTY;
+        if (status[0] == 'C' /* Charging */) {
+            charge_symbol = LV_SYMBOL_CHARGE;
+        } else {
+            if (capacity >= 90) {
+                charge_symbol = LV_SYMBOL_BATTERY_FULL;
+            } else if (capacity >= 75) {
+                charge_symbol = LV_SYMBOL_BATTERY_3;
+            } else if (capacity >= 50) {
+                charge_symbol = LV_SYMBOL_BATTERY_2;
+            } else if (capacity >= 25) {
+                charge_symbol = LV_SYMBOL_BATTERY_1;
+            } else if (capacity > 0) {
+                charge_symbol = LV_SYMBOL_BATTERY_EMPTY;
+            }
+        }
+        lv_label_set_text(ui_elements.battery_charge, charge_symbol);
+    }
+
+    // Force full area refresh for left side elements
+    lv_obj_invalidate(lv_obj_get_parent(ui_elements.battery_charge));
 }
 
 /**
@@ -201,6 +261,7 @@ static int tick_init(void)
 
 int ui_interface_init(void)
 {
+    printf("[ UI ] Initializing LVGL interface...\n");
     int ui_width, ui_height, ui_rotate;
     if (drm_get_overlay_frame_size(&ui_width, &ui_height, &ui_rotate) != 0) {
         fprintf(stderr, "[ LVGL ] Failed to get UI frame size\n");
@@ -248,7 +309,7 @@ int ui_interface_init(void)
     disp_drv.flush_cb = lvgl_flush_cb;
     disp_drv.hor_res = lvgl_width;
     disp_drv.ver_res = lvgl_height;
-    disp_drv.full_refresh = 0;
+    disp_drv.full_refresh = 0;  // 1- Force full refresh to avoid partial update issues
     disp_drv.direct_mode = 0;
     disp_drv.antialiasing = 1;
     
@@ -374,32 +435,36 @@ static void mark_static_object(lv_obj_t *obj)
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 
-void lvgl_create_test_ui(void)
+void lvgl_create_ui(void)
 {
     pthread_mutex_lock(&lvgl_mutex);
-    
+
+    const lv_font_t *default_font = &lv_font_montserrat_20;
+
+    printf("[ UI ] Creating HUD UI...\n");
+
     // Check if display is initialized
     if (!disp) {
         printf("[ LVGL ] Display not initialized, cannot create UI\n");
         pthread_mutex_unlock(&lvgl_mutex);
         return;
     }
-    
+
     // Get the screen dimensions from our registered display
     lv_coord_t width = lv_disp_get_hor_res(disp);
     lv_coord_t height = lv_disp_get_ver_res(disp);
-    
+
     printf("[ LVGL ] Creating drone camera HUD UI for screen %dx%d\n", (int)width, (int)height);
-    
+
     // Force a full screen refresh before creating UI
     lv_obj_invalidate(lv_scr_act());
-    
+
     // Set semi-transparent background for HUD overlay (not fully transparent)
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_10, LV_PART_MAIN);
     lv_obj_set_style_bg_color(lv_scr_act(), lv_color_make(0, 0, 0), LV_PART_MAIN);
     
     printf("[ LVGL ] Screen background set\n");
-    
+
     // Create top status bar
     lv_obj_t *top_bar = lv_obj_create(lv_scr_act());
     lv_obj_set_size(top_bar, width - 20, 50);
@@ -411,182 +476,79 @@ void lvgl_create_test_ui(void)
     lv_obj_set_style_radius(top_bar, 5, LV_PART_MAIN);
     mark_static_object(top_bar);
     printf("[ LVGL ] Top bar created\n");
-    
+
     // Battery indicator (top left)
-    lv_obj_t *battery_label = lv_label_create(top_bar);
-    lv_label_set_text(battery_label, "BAT: 87%");
-    lv_obj_align(battery_label, LV_ALIGN_LEFT_MID, 15, 0);
-    lv_obj_set_style_text_color(battery_label, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(battery_label, LV_OPA_TRANSP, LV_PART_MAIN); // Make label background transparent
-    mark_static_object(battery_label);
-    
-    // GPS status (top center-left)
-    lv_obj_t *gps_label = lv_label_create(top_bar);
-    lv_label_set_text(gps_label, "GPS: 12");
-    lv_obj_align(gps_label, LV_ALIGN_LEFT_MID, 120, 0);
-    lv_obj_set_style_text_color(gps_label, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(gps_label, LV_OPA_TRANSP, LV_PART_MAIN);
-    mark_static_object(gps_label);
-    
-    // Flight mode (top center)
-    lv_obj_t *mode_label = lv_label_create(top_bar);
-    lv_label_set_text(mode_label, "STAB");
-    lv_obj_align(mode_label, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_color(mode_label, lv_color_make(255, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(mode_label, LV_OPA_TRANSP, LV_PART_MAIN);
-    mark_static_object(mode_label);
-    
+    ui_elements.battery_charge = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.battery_charge, "_");
+    lv_obj_set_style_text_font(ui_elements.battery_charge, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.battery_charge, LV_ALIGN_LEFT_MID, 15, 0);
+    lv_obj_set_style_text_color(ui_elements.battery_charge, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.battery_charge, LV_OPA_TRANSP, LV_PART_MAIN); // Make label background transparent
+
+    // Battery percentage indicator (top left)
+    ui_elements.battery = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.battery, "BAT: 0%");
+    lv_obj_set_style_text_font(ui_elements.battery, default_font, LV_PART_MAIN); // Example: Set font size to 16
+    lv_obj_align(ui_elements.battery, LV_ALIGN_LEFT_MID, 30, 0);
+    lv_obj_set_style_text_color(ui_elements.battery, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.battery, LV_OPA_TRANSP, LV_PART_MAIN); // Make label background transparent
+
+    // Create only one timer for battery update
+    create_tracked_timer(update_battery_charge, 1000, NULL);
+
     // Signal strength (top center-right)
-    lv_obj_t *signal_label = lv_label_create(top_bar);
-    lv_label_set_text(signal_label, "RSSI: -45dBm");
-    lv_obj_align(signal_label, LV_ALIGN_RIGHT_MID, -120, 0);
-    lv_obj_set_style_text_color(signal_label, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(signal_label, LV_OPA_TRANSP, LV_PART_MAIN);
-    mark_static_object(signal_label);
-    
+    ui_elements.signal = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.signal, "RSSI: 0dBm");
+    lv_obj_set_style_text_font(ui_elements.signal, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.signal, LV_ALIGN_RIGHT_MID, -120, 0);
+    lv_obj_set_style_text_color(ui_elements.signal, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.signal, LV_OPA_TRANSP, LV_PART_MAIN);
+    mark_static_object(ui_elements.signal);
+
+    // Bitrate indicator (top center)
+    ui_elements.bitrate = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.bitrate, LV_SYMBOL_WIFI" 0Mbps");
+    lv_obj_set_style_text_font(ui_elements.bitrate, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.bitrate, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_text_color(ui_elements.bitrate, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.bitrate, LV_OPA_TRANSP, LV_PART_MAIN);
+    mark_static_object(ui_elements.bitrate);
+
     // Digital clock (top right)
-    lv_obj_t *clock_label = lv_label_create(top_bar);
-    lv_obj_align(clock_label, LV_ALIGN_RIGHT_MID, -15, 0);
-    lv_obj_set_style_text_color(clock_label, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(clock_label, LV_OPA_TRANSP, LV_PART_MAIN);
-    create_tracked_timer(update_clock, 1000, clock_label);
-    
-    // Left side altitude bar
-    lv_obj_t *alt_container = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(alt_container, 80, height - 120);
-    lv_obj_align(alt_container, LV_ALIGN_LEFT_MID, 10, 0);
-    lv_obj_set_style_bg_color(alt_container, lv_color_make(0, 0, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(alt_container, LV_OPA_80, LV_PART_MAIN);
-    lv_obj_set_style_border_width(alt_container, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(alt_container, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_radius(alt_container, 5, LV_PART_MAIN);
-    mark_static_object(alt_container);
-    
-    printf("[ LVGL ] Altitude container created\n");
-    
-    // Altitude label
-    lv_obj_t *alt_title = lv_label_create(alt_container);
-    lv_label_set_text(alt_title, "ALT");
-    lv_obj_align(alt_title, LV_ALIGN_TOP_MID, 0, 8);
-    lv_obj_set_style_text_color(alt_title, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(alt_title, LV_OPA_TRANSP, LV_PART_MAIN);
-    mark_static_object(alt_title);
-    
-    // Altitude value (animated)
-    lv_obj_t *alt_value = lv_label_create(alt_container);
-    lv_label_set_text(alt_value, "125.3m");
-    lv_obj_align(alt_value, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_color(alt_value, lv_color_make(0, 255, 255), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(alt_value, LV_OPA_TRANSP, LV_PART_MAIN);
-    
-    // Right side speed bar
-    lv_obj_t *speed_container = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(speed_container, 80, height - 120);
-    lv_obj_align(speed_container, LV_ALIGN_RIGHT_MID, -10, 0);
-    lv_obj_set_style_bg_color(speed_container, lv_color_make(0, 0, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(speed_container, LV_OPA_80, LV_PART_MAIN);
-    lv_obj_set_style_border_width(speed_container, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(speed_container, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_radius(speed_container, 5, LV_PART_MAIN);
-    mark_static_object(speed_container);
-    
-    // Speed label
-    lv_obj_t *speed_title = lv_label_create(speed_container);
-    lv_label_set_text(speed_title, "SPD");
-    lv_obj_align(speed_title, LV_ALIGN_TOP_MID, 0, 8);
-    lv_obj_set_style_text_color(speed_title, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(speed_title, LV_OPA_TRANSP, LV_PART_MAIN);
-    mark_static_object(speed_title);
-    
-    // Speed value (animated)
-    lv_obj_t *speed_value = lv_label_create(speed_container);
-    lv_label_set_text(speed_value, "15.2m/s");
-    lv_obj_align(speed_value, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_color(speed_value, lv_color_make(0, 255, 255), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(speed_value, LV_OPA_TRANSP, LV_PART_MAIN);
-    
-    // Bottom status bar
-    lv_obj_t *bottom_bar = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(bottom_bar, width - 20, 60);
-    lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_obj_set_style_bg_color(bottom_bar, lv_color_make(0, 0, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_80, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bottom_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(bottom_bar, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_radius(bottom_bar, 5, LV_PART_MAIN);
-    mark_static_object(bottom_bar);
-    
-    // Distance to home (bottom left)
-    lv_obj_t *home_dist_label = lv_label_create(bottom_bar);
-    lv_label_set_text(home_dist_label, "HOME: 324m");
-    lv_obj_align(home_dist_label, LV_ALIGN_LEFT_MID, 15, -10);
-    lv_obj_set_style_text_color(home_dist_label, lv_color_make(255, 255, 0), LV_PART_MAIN);
-    mark_static_object(home_dist_label);
-    
-    // Drone position coordinates (bottom center-left)
-    lv_obj_t *coords_label = lv_label_create(bottom_bar);
-    lv_label_set_text(coords_label, "50.4501°N 30.5234°E");
-    lv_obj_align(coords_label, LV_ALIGN_LEFT_MID, 15, 10);
-    lv_obj_set_style_text_color(coords_label, lv_color_make(200, 200, 200), LV_PART_MAIN);
-    mark_static_object(coords_label);
-    
-    // Recording status (bottom center)
-    lv_obj_t *rec_label = lv_label_create(bottom_bar);
-    lv_label_set_text(rec_label, "REC 02:34");
-    lv_obj_align(rec_label, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_color(rec_label, lv_color_make(255, 0, 0), LV_PART_MAIN);
-    mark_static_object(rec_label);
-    
-    // Throttle/Power level (bottom right)
-    lv_obj_t *throttle_label = lv_label_create(bottom_bar);
-    lv_label_set_text(throttle_label, "THR: 65%");
-    lv_obj_align(throttle_label, LV_ALIGN_RIGHT_MID, -15, 0);
-    lv_obj_set_style_text_color(throttle_label, lv_color_make(255, 165, 0), LV_PART_MAIN);
-    
-    // Central crosshair/target indicator
-    lv_obj_t *crosshair = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(crosshair, 40, 40);
-    lv_obj_align(crosshair, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_opa(crosshair, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(crosshair, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(crosshair, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_radius(crosshair, 20, LV_PART_MAIN);
-    mark_static_object(crosshair);
-    
-    // Add center dot
-    lv_obj_t *center_dot = lv_obj_create(crosshair);
-    lv_obj_set_size(center_dot, 4, 4);
-    lv_obj_align(center_dot, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(center_dot, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_border_width(center_dot, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(center_dot, 2, LV_PART_MAIN);
-    mark_static_object(center_dot);
-    
-    // Gimbal angle indicator (near crosshair)
-    lv_obj_t *gimbal_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(gimbal_label, "CAM: -15°");
-    lv_obj_align(gimbal_label, LV_ALIGN_CENTER, 60, 60);
-    lv_obj_set_style_text_color(gimbal_label, lv_color_make(255, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(gimbal_label, lv_color_make(0, 0, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(gimbal_label, LV_OPA_60, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(gimbal_label, 3, LV_PART_MAIN);
-    lv_obj_set_style_radius(gimbal_label, 3, LV_PART_MAIN);
-    mark_static_object(gimbal_label);
-    
-    // Create telemetry animation
-    drone_telemetry_t *telemetry_data = (drone_telemetry_t*)malloc(sizeof(drone_telemetry_t));
-    if (telemetry_data) {
-        telemetry_data->alt_value = alt_value;
-        telemetry_data->speed_value = speed_value;
-        telemetry_data->throttle_label = throttle_label;
-        telemetry_data->alt_counter = 0;
-        telemetry_data->speed_counter = 0;
-        telemetry_data->throttle_counter = 0;
-        
-        // Create timer for telemetry updates
-        create_tracked_timer(update_drone_telemetry, 200, telemetry_data);
-    }
-    
+    ui_elements.clock = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.clock, "00:00:00");
+    lv_obj_set_style_text_font(ui_elements.clock, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.clock, LV_ALIGN_RIGHT_MID, -15, 0);
+    lv_obj_set_style_text_color(ui_elements.clock, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.clock, LV_OPA_TRANSP, LV_PART_MAIN);
+    create_tracked_timer(update_clock, 1000, ui_elements.clock);
+
+    ui_elements.curr_button = lv_label_create(top_bar);
+    lv_label_set_text(ui_elements.curr_button, "none");
+    lv_obj_set_style_text_font(ui_elements.curr_button, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.curr_button, LV_ALIGN_CENTER, 150, 0);
+    lv_obj_set_style_text_color(ui_elements.curr_button, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.curr_button, LV_OPA_TRANSP, LV_PART_MAIN);
+
+    // // Bottom status bar
+    // lv_obj_t *bottom_bar = lv_obj_create(lv_scr_act());
+    // lv_obj_set_size(bottom_bar, width - 20, 60);
+    // lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
+    // lv_obj_set_style_bg_color(bottom_bar, lv_color_make(0, 0, 0), LV_PART_MAIN);
+    // lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_80, LV_PART_MAIN);
+    // lv_obj_set_style_border_width(bottom_bar, 1, LV_PART_MAIN);
+    // lv_obj_set_style_border_color(bottom_bar, lv_color_white(), LV_PART_MAIN);
+    // lv_obj_set_style_radius(bottom_bar, 5, LV_PART_MAIN);
+    // mark_static_object(bottom_bar);
+
+    // // Recording status (bottom center)
+    // lv_obj_t *rec_label = lv_label_create(bottom_bar);
+    // lv_label_set_text(rec_label, "REC 02:34");
+    // lv_obj_align(rec_label, LV_ALIGN_CENTER, 0, 0);
+    // lv_obj_set_style_text_color(rec_label, lv_color_make(255, 0, 0), LV_PART_MAIN);
+    // mark_static_object(rec_label);
+
     printf("[ LVGL ] Drone HUD UI created successfully\n");
     pthread_mutex_unlock(&lvgl_mutex);
+
 }

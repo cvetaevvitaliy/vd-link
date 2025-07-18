@@ -42,7 +42,6 @@
 #include "util/debug.h"
 #include "net/data_protocol.h"
 #include "drm_display.h"
-#include "wfb_status_link.h"
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
@@ -496,7 +495,7 @@ void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_D
 
 #define CHAR_LINK_LQ "\x7B"
 #define CHAR_LINK_BW "\x70"
-void wfb_status_link_callback(const wfb_rx_status *st)
+void osd_wfb_status_link_callback(const wfb_rx_status *st)
 {
     char str[128];
     int len = 0;
@@ -586,8 +585,6 @@ static void* msp_osd_thread(void *arg)
     start_display();
     usleep(100000);
 
-    wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
-
 #if 0    // test all characters
     uint8_t c = 0;
     for (int j = 0; j < MAX_DISPLAY_Y; ++j) {
@@ -608,8 +605,6 @@ static void* msp_osd_thread(void *arg)
         }
         usleep(10000);
     }
-
-    wfb_status_link_stop();
 
     // Clean OSD buffer
     if (osd_compositor_buffer) {

@@ -138,6 +138,12 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     }
 }
 
+void wfb_status_link_callback(const wfb_rx_status *st)
+{
+    ui_update_wfb_ng_telemetry(st);
+    osd_wfb_status_link_callback(st);
+}
+
 int main(int argc, char* argv[])
 {
     struct config_t config = {
@@ -159,9 +165,11 @@ int main(int argc, char* argv[])
     ui_interface_init();
     
     // Create test UI to verify overlay
-    lvgl_create_test_ui();
+    lvgl_create_ui();
 
     msp_osd_init(&config);
+
+    wfb_status_link_start(config.ip, config.wfb_port, wfb_status_link_callback);
 
     rtp_receiver_start(&config);
 
@@ -172,6 +180,8 @@ int main(int argc, char* argv[])
         // Sleep for optimal performance with compositor
         usleep(16000); // ~60 FPS
     }
+
+     wfb_status_link_stop();
 
     return 0;
 }

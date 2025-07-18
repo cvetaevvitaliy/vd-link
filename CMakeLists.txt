@@ -17,7 +17,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 include(FetchContent)
 
 # LVGL configuration
-set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lv_conf.h CACHE STRING "LVGL configuration file path")
+set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/ui_interface/lv_conf.h CACHE STRING "LVGL configuration file path")
 
 # Fetch LVGL from GitHub
 FetchContent_Declare(
@@ -55,6 +55,7 @@ message(STATUS "MSGPACK_INCLUDE_DIRS: ${MSGPACK_INCLUDE_DIRS}")
 
 include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${ZLIB_INCLUDE_DIRS}
         ${MPP_INCLUDE_DIRS}
         ${LIBDRM_INCLUDE_DIRS}
@@ -63,7 +64,7 @@ include_directories(${PROJECT_NAME}
         ${MSGPACK_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui_interface  # For lv_conf.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui_interface  # For lv_conf.h
 )
 
 set(MSP_OSD_SRC

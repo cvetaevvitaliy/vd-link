@@ -4,6 +4,7 @@
 #include "lvgl.h"
 #include "../drm_display.h"
 #include "compositor.h"
+#include "wfb_status_link.h"
 
 /**
  * Initialize LVGL with the compositor
@@ -28,6 +29,12 @@ void ui_interface_deinit(void);
  * This will create a simple demo UI with various elements
  * to confirm that the LVGL rendering is working properly
  */
-void lvgl_create_test_ui(void);
+void lvgl_create_ui(void);
+
+/**
+ * Update the UI with the current WFB status
+ * @param st Pointer to the WFB status structure
+ */
+void ui_update_wfb_ng_telemetry(const wfb_rx_status *st);
 
 #endif // VD_LINK_UI_INTERFACE_H
