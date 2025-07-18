@@ -35,18 +35,32 @@
 #include "src/rtp_receiver.h"
 #include "src/common.h"
 #include "src/drm_display.h"
+#include "src/ui_interface/interface_lvgl.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
 
 static volatile int running = 1;
+static volatile int cleanup_done = 0;
 
 static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
     running = 0;
+    
+    // Prevent multiple cleanup calls
+    if (cleanup_done) {
+        printf("[ MAIN ] Force exit\n");
+        exit(1);
+    }
+    cleanup_done = 1;
+    
     msp_osd_stop();
     rtp_receiver_stop();
+    ui_interface_deinit();
     drm_close();
+    
+    printf("[ MAIN ] Cleanup completed, exiting\n");
+    exit(0);
 }
 
 static void setup_signals(void)
@@ -140,13 +154,23 @@ int main(int argc, char* argv[])
     setup_signals();
 
     drm_init("/dev/dri/card0", &config);
+    
+    // Initialize LVGL UI system
+    ui_interface_init();
+    
+    // Create test UI to verify overlay
+    lvgl_create_test_ui();
 
     msp_osd_init(&config);
 
     rtp_receiver_start(&config);
 
     while (running) {
-        usleep(100000); // Sleep for 100 ms
+        // Update LVGL UI and compositor
+        ui_interface_update();
+
+        // Sleep for optimal performance with compositor
+        usleep(16000); // ~60 FPS
     }
 
     return 0;

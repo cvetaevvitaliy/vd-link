@@ -60,14 +60,14 @@ static struct drm_context_t drm_context = {
         .drm_fd = -1,
         .nv12_plane_id = -1,
         .argb888_plane_id = -1,
-        .osd_plane_props = {0},
+        .overlay_plane_props = {0},
         .video_plane_props = {0},
 };
 
 struct drm_fb_cleanup {
     int drm_fd;
     struct drm_context_t *ctx;
-    uint32_t fb_osd_id;
+    uint32_t fb_overlay_id;
     uint32_t fb_video_id;
     int rotate_idx;
 };
@@ -87,22 +87,22 @@ static atomic_int running = 0;
 static pthread_t drm_thread;
 static atomic_int pending_commit = 0;
 
-#define OSD_BUF_COUNT 2
+#define OVERLAY_BUF_COUNT 2
 #define MAX_VIDEO_BUFS 16
 #define ROTATE_BUF_COUNT (MAX_VIDEO_BUFS)
 
-#define OSD_WIDTH  1280
-#define OSD_HEIGHT  720
+#define OVERLAY_WIDTH  1280
+#define OVERLAY_HEIGHT  720
 
-struct drm_fb_t osd_bufs[OSD_BUF_COUNT];
+struct drm_fb_t overlay_bufs[OVERLAY_BUF_COUNT];
 
 struct {
-    int dirty[OSD_BUF_COUNT];
-    int osd_width;
-    int osd_height;
+    int dirty[OVERLAY_BUF_COUNT];
+    int overlay_width;
+    int overlay_height;
     int cur;
     int next;
-} osd_db = { {0,0}, 0, 1 };
+} overlay_db = { {0,0}, 0, 1 };
 
 struct {
     int dma_fd[MAX_VIDEO_BUFS];
@@ -129,7 +129,7 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
 static void drm_init_event_context(void);
 static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height, int wstride, int hstride, int rotation);
 static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_height, int rotation);
-static int drm_create_osd_buff_pool(struct drm_context_t *ctx);
+static int drm_create_overlay_buff_pool(struct drm_context_t *ctx);
 
 static void drm_print_modes(struct drm_context_t *drm_ctx)
 {
@@ -513,7 +513,7 @@ static int drm_prepare_argb8888_fb(struct drm_context_t *ctx, int dma_fd, int wi
     return fb2.fb_id;
 }
 
-int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *osd_fb, int osd_width, int osd_height,
+int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *overlay_fb, int overlay_width, int overlay_height,
                                   uint32_t video_fb_id, int dma_fd, int video_width, int video_height)
 {
     if (ctx->argb888_plane_id < 0 && ctx->nv12_plane_id < 0) {
@@ -522,8 +522,8 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *os
     }
 
 #if DRM_DEBUG
-    printf("[ DRM ] drm_fd=%d Committing video plane %d with FB %d, dma_fd %d size %dx%d, osd plane %d with FB %d, size %dx%d,\n", ctx->drm_fd, ctx->nv12_plane_id, video_fb_id, dma_fd,
-           video_width, video_height, ctx->argb888_plane_id, osd_fb->fb_id, osd_width, osd_height);
+    printf("[ DRM ] drm_fd=%d Committing video plane %d with FB %d, dma_fd %d size %dx%d, overlay plane %d with FB %d, size %dx%d,\n", ctx->drm_fd, ctx->nv12_plane_id, video_fb_id, dma_fd,
+           video_width, video_height, ctx->argb888_plane_id, overlay_fb->fb_id, overlay_width, overlay_height);
 #endif
 
     drmModeAtomicReq *req = drmModeAtomicAlloc();
@@ -533,7 +533,7 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *os
     }
 
     struct drm_plane_props *video_plane_props = &ctx->video_plane_props;
-    struct drm_plane_props *osd_plane_props = &ctx->osd_plane_props;
+    struct drm_plane_props *overlay_plane_props = &ctx->overlay_plane_props;
 
     if (!ctx || !ctx->connector || !ctx->crtc || !video_plane_props) {
         fprintf(stderr, "NULL pointer in DRM context!\n");
@@ -560,75 +560,75 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *os
     int crtc_video_x = (int)(ctx->display_info.hdisplay - crtc_video_w) / 2;
     int crtc_video_y = (int)(ctx->display_info.vdisplay - crtc_video_h) / 2;
 
-    // Calculate aspect-ratio-preserving scaling and centering for OSD
+    // Calculate aspect-ratio-preserving scaling and centering for OVERLAY
     uint32_t screen_w = ctx->display_info.hdisplay;
     uint32_t screen_h = ctx->display_info.vdisplay;
-    float ar_src = (float)osd_width / osd_height;
+    float ar_src = (float)overlay_width / overlay_height;
     float ar_dst = (float)screen_w / screen_h;
-    uint32_t crtc_osd_w, crtc_osd_h, crtc_osd_x, crtc_osd_y;
+    uint32_t crtc_overlay_w, crtc_overlay_h, crtc_overlay_x, crtc_overlay_y;
 
     if (ar_dst > ar_src) {
         // Display is wider than image: pad left/right
-        crtc_osd_h = screen_h;
-        crtc_osd_w = (int)(screen_h * ar_src);
-        crtc_osd_x = (screen_w - crtc_osd_w) / 2;
-        crtc_osd_y = 0;
+        crtc_overlay_h = screen_h;
+        crtc_overlay_w = (int)(screen_h * ar_src);
+        crtc_overlay_x = (screen_w - crtc_overlay_w) / 2;
+        crtc_overlay_y = 0;
     } else {
         // Display is taller than image: pad top/bottom
-        crtc_osd_w = screen_w;
-        crtc_osd_h = (int)(screen_w / ar_src);
-        crtc_osd_x = 0;
-        crtc_osd_y = (screen_h - crtc_osd_h) / 2;
+        crtc_overlay_w = screen_w;
+        crtc_overlay_h = (int)(screen_w / ar_src);
+        crtc_overlay_x = 0;
+        crtc_overlay_y = (screen_h - crtc_overlay_h) / 2;
     }
 
     // Set connector property CRTC_ID if present
     if (video_plane_props->connector_crtc_id > 0) {
         drmModeAtomicAddProperty(req, ctx->connector->connector_id, video_plane_props->connector_crtc_id,ctx->crtc->crtc_id);
-        drmModeAtomicAddProperty(req, ctx->connector->connector_id, osd_plane_props->connector_crtc_id,ctx->crtc->crtc_id);
+        drmModeAtomicAddProperty(req, ctx->connector->connector_id, overlay_plane_props->connector_crtc_id,ctx->crtc->crtc_id);
     }
 
     // Set CRTC properties if present (MODE_ID and ACTIVE)
     if (video_plane_props->mode_id > 0) {
         drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, video_plane_props->mode_id, video_plane_props->mode_blob_id);
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, osd_plane_props->mode_id, osd_plane_props->mode_blob_id);
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, overlay_plane_props->mode_id, overlay_plane_props->mode_blob_id);
     }
     if (video_plane_props->active > 0) {
         drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, video_plane_props->active, 1);
-        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, osd_plane_props->active, 1);
+        drmModeAtomicAddProperty(req, ctx->crtc->crtc_id, overlay_plane_props->active, 1);
     }
 
-    // Set video plane & OSD plane properties
+    // Set video plane & OVERLAY plane properties
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_id, ctx->crtc->crtc_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_id, ctx->crtc->crtc_id);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->crtc_id, ctx->crtc->crtc_id);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->fb_id,   video_fb_id);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->fb_id,   osd_fb->fb_id);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->fb_id,   overlay_fb->fb_id);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_x,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_x,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->src_x,   0 << 16);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_y,   0 << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_y,   0 << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->src_y,   0 << 16);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_w,   video_width << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_w,   osd_width << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->src_w,   overlay_width << 16);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->src_h,   video_height << 16);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->src_h,   osd_height << 16);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->src_h,   overlay_height << 16);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_x, crtc_video_x);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_x, crtc_osd_x);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->crtc_x, crtc_overlay_x);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_y, crtc_video_y);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_y, crtc_osd_y);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->crtc_y, crtc_overlay_y);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_w, crtc_video_w);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_w, crtc_osd_w);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->crtc_w, crtc_overlay_w);
     drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->crtc_h, crtc_video_h);
-    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->crtc_h, crtc_osd_h);
+    drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->crtc_h, crtc_overlay_h);
 
     // Set Z-position if property is available
     if (video_plane_props->zpos > 0) {
         drmModeAtomicAddProperty(req, ctx->nv12_plane_id, video_plane_props->zpos, 0);
-        drmModeAtomicAddProperty(req, ctx->argb888_plane_id, osd_plane_props->zpos, 1);
+        drmModeAtomicAddProperty(req, ctx->argb888_plane_id, overlay_plane_props->zpos, 1);
     }
 
 
     cleanup.drm_fd = ctx->drm_fd;
     cleanup.fb_video_id = video_fb_id;
-    cleanup.fb_osd_id = osd_fb->fb_id;
+    cleanup.fb_overlay_id = overlay_fb->fb_id;
     cleanup.ctx = ctx;
 
     if (drmModeAtomicCommit(ctx->drm_fd, req, DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT, &cleanup) < 0) {
@@ -639,9 +639,9 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *os
     }
 
 #if DRM_DEBUG
-    printf("[ DRM ] Atomic commit completed: video plane %d with FB %d, size %dx%d, osd plane %d with FB %d, size %dx%d\n",
+    printf("[ DRM ] Atomic commit completed: video plane %d with FB %d, size %dx%d, overlay plane %d with FB %d, size %dx%d\n",
            ctx->nv12_plane_id, video_fb_id, video_width, video_height,
-           ctx->argb888_plane_id, osd_fb->fb_id, osd_width, osd_height);
+           ctx->argb888_plane_id, overlay_fb->fb_id, overlay_width, overlay_height);
 #endif
 
     drmModeAtomicFree(req);
@@ -895,7 +895,7 @@ static int drm_activate_crtc(struct drm_context_t *ctx)
     return ret;
 }
 
-void drm_disable_unused_planes(int drm_fd, uint32_t crtc_id, uint32_t plane_video_id, uint32_t plane_osd_id)
+void drm_disable_unused_planes(int drm_fd, uint32_t crtc_id, uint32_t plane_video_id, uint32_t plane_overlay_id)
 {
     drmModePlaneRes* plane_res = drmModeGetPlaneResources(drm_fd);
     if (!plane_res)
@@ -904,8 +904,8 @@ void drm_disable_unused_planes(int drm_fd, uint32_t crtc_id, uint32_t plane_vide
     for (uint32_t i = 0; i < plane_res->count_planes; i++) {
         uint32_t plane_id = plane_res->planes[i];
 
-        // Skip video and OSD planes
-        if (plane_id == plane_video_id || plane_id == plane_osd_id)
+        // Skip video and OVERLAY planes
+        if (plane_id == plane_video_id || plane_id == plane_overlay_id)
             continue;
 
         drmModePlane* plane = drmModeGetPlane(drm_fd, plane_id);
@@ -1050,10 +1050,10 @@ int drm_init(char *device, struct config_t *cfg)
     }
 
     // Fill plane properties for ARGB8888 plane
-    drm_fill_plane_props(drm_context.drm_fd, drm_context.argb888_plane_id, &drm_context.osd_plane_props,
+    drm_fill_plane_props(drm_context.drm_fd, drm_context.argb888_plane_id, &drm_context.overlay_plane_props,
                          drm_context.connector->connector_id, drm_context.crtc->crtc_id, &drm_context.connector->modes[0]);
 
-    printf("[ DRM ] Found NV12 plane ID: %d for video, ARGB8888 plane ID: %d for OSD\n", drm_context.nv12_plane_id, drm_context.argb888_plane_id);
+    printf("[ DRM ] Found NV12 plane ID: %d for video, ARGB8888 plane ID: %d for OVERLAY\n", drm_context.nv12_plane_id, drm_context.argb888_plane_id);
 
     drm_disable_unused_planes(drm_context.drm_fd, drm_context.crtc->crtc_id, drm_context.nv12_plane_id, drm_context.argb888_plane_id);
 
@@ -1065,7 +1065,7 @@ int drm_init(char *device, struct config_t *cfg)
     printf("[ DRM ] Detected rotation: %d degrees\n", drm_context.rotate);
     //drm_context.rotate = 0; // Force set no rotation for testing
 
-    drm_create_osd_buff_pool(&drm_context);
+    drm_create_overlay_buff_pool(&drm_context);
 
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
@@ -1082,17 +1082,17 @@ static int test_draw_all_plane(struct drm_context_t *ctx)
     int ret = 0;
     int width = ctx->display_info.hdisplay;
     int height = ctx->display_info.vdisplay;
-    struct drm_fb_t osd_frame_buffer = {0};
+    struct drm_fb_t overlay_frame_buffer = {0};
 
-    drm_create_dumb_argb8888_fb(ctx, width, height, &osd_frame_buffer);
-    if (osd_frame_buffer.buff_addr == MAP_FAILED) {
+    drm_create_dumb_argb8888_fb(ctx, width, height, &overlay_frame_buffer);
+    if (overlay_frame_buffer.buff_addr == MAP_FAILED) {
         fprintf(stderr, "[ DRM ] Failed to create ARGB8888 framebuffer: %s\n", strerror(errno));
         return -1;
     }
-    printf("[ DRM TEST ] Created OSD framebuffer: fb_id=%u, size=%zu\n", osd_frame_buffer.fb_id, osd_frame_buffer.size);
+    printf("[ DRM TEST ] Created OVERLAY framebuffer: fb_id=%u, size=%zu\n", overlay_frame_buffer.fb_id, overlay_frame_buffer.size);
 
-    // Fill the OSD framebuffer with a rainbow pattern
-    fill_rainbow_argb8888(&osd_frame_buffer, width, height);
+    // Fill the OVERLAY framebuffer with a rainbow pattern
+    fill_rainbow_argb8888(&overlay_frame_buffer, width, height);
 
     void *src_nv12 = malloc(width * height * 3 / 2);
     if (src_nv12 == NULL) {
@@ -1139,7 +1139,7 @@ static int test_draw_all_plane(struct drm_context_t *ctx)
     printf("[ DRM TEST ] Created framebuffer: fb_id=%u\n", fb2.fb_id);
 
 
-    ret = drm_atomic_commit_all_buffers(ctx, &osd_frame_buffer, width, height, fb2.fb_id, 0,
+    ret = drm_atomic_commit_all_buffers(ctx, &overlay_frame_buffer, width, height, fb2.fb_id, 0,
                                         width, height);
     if (ret < 0) {
         fprintf(stderr, "[ DRM ] Failed to commit video framebuffer: %s\n", strerror(errno));
@@ -1168,10 +1168,10 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
 
     if (cleanup.drm_fd >= 0) {
 
-        if (osd_db.dirty[osd_db.next]) {
-            osd_db.cur ^= 1;
-            osd_db.next ^= 1;
-            osd_db.dirty[osd_db.cur] = 0;
+        if (overlay_db.dirty[overlay_db.next]) {
+            overlay_db.cur ^= 1;
+            overlay_db.next ^= 1;
+            overlay_db.dirty[overlay_db.cur] = 0;
         }
 
         if (video_buf_map.dirty[video_buf_map.cur]) {
@@ -1179,7 +1179,7 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
         }
         int video_cur = video_buf_map.cur;
 
-        drm_atomic_commit_all_buffers(cleanup.ctx, &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+        drm_atomic_commit_all_buffers(cleanup.ctx, &overlay_bufs[overlay_db.cur], overlay_db.overlay_width, overlay_db.overlay_height,
                                       video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
                                       video_buf_map.video_width, video_buf_map.video_height);
     }
@@ -1190,7 +1190,7 @@ static void drm_init_event_context(void)
     evctx.page_flip_handler = drm_page_flip_handler;
 }
 
-static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
+static int drm_create_overlay_buff_pool(struct drm_context_t *ctx)
 {
     if (!ctx || ctx->drm_fd < 0) {
         fprintf(stderr, "[ DRM ] Invalid DRM context\n");
@@ -1198,27 +1198,27 @@ static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
     }
 
     int ret = 0;
-    int width = OSD_WIDTH;
-    int height = OSD_HEIGHT;
+    int width = OVERLAY_WIDTH;
+    int height = OVERLAY_HEIGHT;
     if (ctx->rotate == 90 || ctx->rotate == 270) {
         // Swap width and height for 90/270 degree rotation
-        width = OSD_HEIGHT;
-        height = OSD_WIDTH;
+        width = OVERLAY_HEIGHT;
+        height = OVERLAY_WIDTH;
     }
 
-    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
-        ret = drm_create_dumb_argb8888_fb(ctx, width, height, &osd_bufs[i]);
+    for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
+        ret = drm_create_dumb_argb8888_fb(ctx, width, height, &overlay_bufs[i]);
         if (ret < 0) {
-            fprintf(stderr, "OSD dumb fb init failed for slot %d\n", i);
+            fprintf(stderr, "OVERLAY dumb fb init failed for slot %d\n", i);
         }
-        osd_db.dirty[i] = 0;
+        overlay_db.dirty[i] = 0;
     }
-    osd_db.osd_width = width;
-    osd_db.osd_height = height;
-    osd_db.cur = 0;
-    osd_db.next = 1;
+    overlay_db.overlay_width = width;
+    overlay_db.overlay_height = height;
+    overlay_db.cur = 0;
+    overlay_db.next = 1;
 
-    printf("[ DRM ] OSD buffer pool created successfully\n");
+    printf("[ DRM ] OVERLAY buffer pool created successfully\n");
     return ret;
 
 }
@@ -1288,58 +1288,58 @@ static void video_buf_map_cleanup(struct drm_context_t *ctx)
     video_buf_map.cur = 0;
 }
 
-static void drm_cleanup_osd_buff_pool(struct drm_context_t *ctx)
+static void drm_cleanup_overlay_buff_pool(struct drm_context_t *ctx)
 {
-    printf("[ DRM ] Cleaning up OSD buffer pool\n");
-    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
-        if (osd_bufs[i].fb_id > 0 && ctx->drm_fd > 0) {
-            drmModeRmFB(ctx->drm_fd, osd_bufs[i].fb_id);
-            printf("[ DRM ] Removed OSD buffer FB %d\n", osd_bufs[i].fb_id);
-            osd_bufs[i].fb_id = 0;
+    printf("[ DRM ] Cleaning up OVERLAY buffer pool\n");
+    for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
+        if (overlay_bufs[i].fb_id > 0 && ctx->drm_fd > 0) {
+            drmModeRmFB(ctx->drm_fd, overlay_bufs[i].fb_id);
+            printf("[ DRM ] Removed OVERLAY buffer FB %d\n", overlay_bufs[i].fb_id);
+            overlay_bufs[i].fb_id = 0;
         }
-        if (osd_bufs[i].buff_addr && osd_bufs[i].buff_addr != MAP_FAILED) {
-            munmap(osd_bufs[i].buff_addr, osd_bufs[i].size);
-            printf("[ DRM ] Unmapped OSD buffer %d\n", i);
-            osd_bufs[i].buff_addr = NULL;
+        if (overlay_bufs[i].buff_addr && overlay_bufs[i].buff_addr != MAP_FAILED) {
+            munmap(overlay_bufs[i].buff_addr, overlay_bufs[i].size);
+            printf("[ DRM ] Unmapped OVERLAY buffer %d\n", i);
+            overlay_bufs[i].buff_addr = NULL;
         }
-        osd_bufs[i].handles[0] = 0;
-        osd_bufs[i].pitches[0] = 0;
-        osd_bufs[i].size = 0;
-        osd_db.dirty[i] = 0;
+        overlay_bufs[i].handles[0] = 0;
+        overlay_bufs[i].pitches[0] = 0;
+        overlay_bufs[i].size = 0;
+        overlay_db.dirty[i] = 0;
     }
-    osd_db.osd_width = 0;
-    osd_db.osd_height = 0;
-    osd_db.cur = 0;
-    osd_db.next = 1;
+    overlay_db.overlay_width = 0;
+    overlay_db.overlay_height = 0;
+    overlay_db.cur = 0;
+    overlay_db.next = 1;
 }
 
-int drm_get_osd_frame_size(int *width, int *height, int *rotate)
+int drm_get_overlay_frame_size(int *width, int *height, int *rotate)
 {
-    if (width) *width = osd_db.osd_width;
-    if (height) *height = osd_db.osd_height;
+    if (width) *width = overlay_db.overlay_width;
+    if (height) *height = overlay_db.overlay_height;
     if (rotate) *rotate = drm_context.rotate;
-    if (osd_db.osd_width <= 0 || osd_db.osd_height <= 0) {
-        fprintf(stderr, "[ DRM ] OSD frame size is not initialized!\n");
+    if (overlay_db.overlay_width <= 0 || overlay_db.overlay_height <= 0) {
+        fprintf(stderr, "[ DRM ] OVERLAY frame size is not initialized!\n");
         return -1;
     }
     return 0;
 }
 
-void drm_push_new_osd_frame(void)
+void drm_push_new_overlay_frame(void)
 {
-    osd_db.dirty[osd_db.next] = 1;
+    overlay_db.dirty[overlay_db.next] = 1;
 }
 
-void *drm_get_next_osd_fb(void)
+void *drm_get_next_overlay_fb(void)
 {
-    if (osd_db.dirty[osd_db.next] == 0 && osd_bufs[osd_db.next].buff_addr) {
-        return osd_bufs[osd_db.next].buff_addr;
+    if (overlay_db.dirty[overlay_db.next] == 0 && overlay_bufs[overlay_db.next].buff_addr) {
+        return overlay_bufs[overlay_db.next].buff_addr;
     }
-    fprintf(stderr, "[ DRM ] OSD buffer %d is dirty or not available\n", osd_db.next);
+    fprintf(stderr, "[ DRM ] OVERLAY buffer %d is dirty or not available\n", overlay_db.next);
     // force dirty to ensure next frame
-    osd_db.cur ^= 1;
-    osd_db.next ^= 1;
-    osd_db.dirty[osd_db.cur] = 0;
+    overlay_db.cur ^= 1;
+    overlay_db.next ^= 1;
+    overlay_db.dirty[overlay_db.cur] = 0;
     return NULL;
 }
 
@@ -1509,10 +1509,10 @@ static void* compositor_thread(void* arg)
         printf("[ DRM ] Compositor thread started with DRM fd %d\n", ctx->drm_fd);
     }
 
-    for (int i = 0; i < OSD_BUF_COUNT; ++i) {
-        fill_transparent_argb8888(&osd_bufs[i], osd_db.osd_width, osd_db.osd_height);
-        //fill_rainbow_argb8888(&osd_bufs[i], osd_db.osd_width, osd_db.osd_height);
-        osd_db.dirty[i] = 0;
+    for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
+        fill_transparent_argb8888(&overlay_bufs[i], overlay_db.overlay_width, overlay_db.overlay_height);
+        //fill_rainbow_argb8888(&overlay_bufs[i], overlay_db.overlay_width, overlay_db.overlay_height);
+        overlay_db.dirty[i] = 0;
     }
 
     if (video_buf_map.count == 0) {
@@ -1540,7 +1540,7 @@ static void* compositor_thread(void* arg)
     // Force initial commit to display the first frame
     int video_cur = video_buf_map.cur;
     drm_atomic_commit_all_buffers(ctx,
-                                  &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                  &overlay_bufs[overlay_db.cur], overlay_db.overlay_width, overlay_db.overlay_height,
                                   video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
                                   video_buf_map.video_width, video_buf_map.video_height);
 
@@ -1550,7 +1550,7 @@ static void* compositor_thread(void* arg)
         if (atomic_load(&pending_commit)) {
             video_cur = video_buf_map.cur;
             drm_atomic_commit_all_buffers(ctx,
-                                          &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                          &overlay_bufs[overlay_db.cur], overlay_db.overlay_width, overlay_db.overlay_height,
                                           video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
                                           video_buf_map.video_width, video_buf_map.video_height);
             atomic_store(&pending_commit, 0);
@@ -1692,5 +1692,5 @@ void drm_close(void)
 
     rotate_video_pool_cleanup(&drm_context);
     video_buf_map_cleanup(&drm_context);
-    drm_cleanup_osd_buff_pool(&drm_context);
+    drm_cleanup_overlay_buff_pool(&drm_context);
 }

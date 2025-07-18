@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8...3.13)
+cmake_minimum_required(VERSION 3.13)
 project(vd-link C)
 
 # Default to Release if not specified
@@ -12,6 +12,26 @@ set(CMAKE_C_FLAGS_RELEASE "-O2")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Include FetchContent for external dependencies
+include(FetchContent)
+
+# LVGL configuration
+set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lv_conf.h CACHE STRING "LVGL configuration file path")
+
+# Fetch LVGL from GitHub
+FetchContent_Declare(
+    lvgl
+    GIT_REPOSITORY https://github.com/lvgl/lvgl.git
+    GIT_TAG v8.3.11
+    GIT_SHALLOW TRUE
+)
+
+# Configure LVGL as a static library
+set(LVGL_BUILD_SHARED OFF CACHE BOOL "Build LVGL as a static library" FORCE)
+
+# Make LVGL available
+FetchContent_MakeAvailable(lvgl)
 
 add_subdirectory(librtp)
 
@@ -43,6 +63,7 @@ include_directories(${PROJECT_NAME}
         ${MSGPACK_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui_interface  # For lv_conf.h
 )
 
 set(MSP_OSD_SRC
@@ -72,14 +93,17 @@ add_executable(${PROJECT_NAME}
         src/decoder.c
         src/msp-osd.c
         src/wfb_status_link.c
+        src/ui_interface/interface_lvgl.c
+        src/ui_interface/compositor.c
 )
 
-target_link_libraries(${PROJECT_NAME} m rtp
+target_link_libraries(${PROJECT_NAME} m rtp pthread
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}
         ${ZLIB_LIBRARIES}
         ${MSGPACK_LIBRARIES}
+        lvgl::lvgl
 )
 
 

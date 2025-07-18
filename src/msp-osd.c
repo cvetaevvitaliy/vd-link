@@ -46,6 +46,7 @@
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
+#include "ui_interface/compositor.h"
 
 #define DEBUG_PRINT_LINK 0
 
@@ -65,6 +66,9 @@ static char current_fc_variant[5];
 static int display_width = 0;
 static int display_height = 0;
 static int rotation = 0; // 0, 90, 180, 270
+
+// OSD buffer for compositor (32-bits ARGB for better quality)
+static uint32_t *osd_compositor_buffer = NULL;
 
 static uint16_t msp_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
@@ -155,7 +159,7 @@ static void msp_clear_screen(void)
 
 static void clear_framebuffer(void)
 {
-    void *fb_addr = drm_get_next_osd_fb();
+    void *fb_addr = drm_get_next_overlay_fb();
     if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
@@ -262,12 +266,115 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
     }
 }
 
+// High-quality OSD rendering to 32-bit ARGB buffer with rotation
+static void draw_character_map_argb(display_info_t *display_info, uint32_t* osd_buffer, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
+{
+    if (display_info->fonts[0] == NULL || osd_buffer == NULL) {
+        return;
+    }
+
+    // Clear OSD buffer (0 = transparent)
+    memset(osd_buffer, 0, display_width * display_height * sizeof(uint32_t));
+
+    int fb_w = display_width;
+    int fb_h = display_height;
+    int osd_w = display_info->char_width * display_info->font_width;
+    int osd_h = display_info->char_height * display_info->font_height;
+    int x_offset = display_info->x_offset;
+    int y_offset = display_info->y_offset;
+
+    int rx_min = 0, ry_min = 0;
+
+    switch (rotation) {
+    case 0:
+        rx_min = 0;
+        ry_min = 0;
+        break;
+    case 90:
+        rx_min = fb_h - (osd_h + y_offset * 2);
+        ry_min = -x_offset;
+        break;
+    case 180:
+        rx_min = fb_w - (osd_w + x_offset * 2);
+        ry_min = fb_h - (osd_h + y_offset * 2);
+        break;
+    case 270:
+        x_offset = -x_offset;
+        y_offset = -y_offset;
+        rx_min = y_offset;
+        ry_min = fb_w - (osd_w + x_offset * 2) - (fb_h - osd_w);
+        break;
+    }
+
+    for (int y = 0; y < display_info->char_height; y++) {
+        for (int x = 0; x < display_info->char_width; x++) {
+            uint16_t c = character_map[x][y];
+            if (c == 0) continue;
+
+            int page = (c & 0x300) >> 8;
+            c = c & 0xFF;
+            void* font = display_info->fonts[page];
+            if (!font) font = display_info->fonts[0];
+
+            uint32_t src_x = x * display_info->font_width + x_offset;
+            uint32_t src_y = y * display_info->font_height + y_offset;
+
+            for (uint8_t gy = 0; gy < display_info->font_height; gy++) {
+                for (uint8_t gx = 0; gx < display_info->font_width; gx++) {
+                    uint32_t px = src_x + gx;
+                    uint32_t py = src_y + gy;
+
+                    int rx = 0, ry = 0;
+                    switch (rotation) {
+                    case 0:
+                        rx = px - rx_min;
+                        ry = py - ry_min;
+                        break;
+                    case 90:
+                        rx = fb_h - 1 - py - rx_min;
+                        ry = px - ry_min;
+                        break;
+                    case 180:
+                        rx = fb_w - 1 - px - rx_min;
+                        ry = fb_h - 1 - py - ry_min;
+                        break;
+                    case 270:
+                        rx = py - rx_min;
+                        ry = fb_w - 1 - px - ry_min;
+                        break;
+                    default:
+                        rx = px - rx_min;
+                        ry = py - ry_min;
+                        break;
+                    }
+
+                    if (rx < 0 || ry < 0 || rx >= fb_w || ry >= fb_h) continue;
+
+                    uint32_t font_offset = (((display_info->font_height * display_info->font_width) * BYTES_PER_PIXEL) * c) + (gy * display_info->font_width + gx) * BYTES_PER_PIXEL;
+                    
+                    // Get font pixel data directly
+                    uint8_t font_r = *((uint8_t *)font + font_offset + 0);
+                    uint8_t font_g = *((uint8_t *)font + font_offset + 1);
+                    uint8_t font_b = *((uint8_t *)font + font_offset + 2);
+                    uint8_t font_a = *((uint8_t *)font + font_offset + 3);
+                    
+                    // Store as full ARGB pixel for maximum quality
+                    if (font_a > 0) {
+                        uint32_t osd_idx = ry * fb_w + rx;
+                        osd_buffer[osd_idx] = (font_a << 24) | (font_r << 16) | (font_g << 8) | font_b;
+                    }
+                }
+            }
+        }
+    }
+}
+
 static void draw_screen(void)
 {
     clear_framebuffer();
 
-    void *fb_addr = drm_get_next_osd_fb();
-    if (fb_addr== NULL) {
+    void *fb_addr = drm_get_next_overlay_fb();
+    if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
     }
@@ -279,16 +386,40 @@ static void draw_screen(void)
         draw_character_map(current_display_info, fb_addr, msp_character_map);
     }
     draw_character_map(&overlay_display_info, fb_addr, overlay_character_map);
+    
+    // Push OSD frame directly to DRM for best quality
+    drm_push_new_overlay_frame();
 }
 
 static void render_screen(void)
 {
-    draw_screen();
-    if (display_mode == DISPLAY_DISABLED) {
-        clear_framebuffer();
+    if (display_mode != DISPLAY_DISABLED && osd_compositor_buffer != NULL) {
+        // Draw the main OSD character map (high quality ARGB with rotation)
+        if (fakehd_is_enabled()) {
+            fakehd_map_sd_character_map_to_hd(msp_character_map, msp_render_character_map);
+            draw_character_map_argb(current_display_info, osd_compositor_buffer, msp_render_character_map);
+        } else {
+            draw_character_map_argb(current_display_info, osd_compositor_buffer, msp_character_map);
+        }
+
+        // Draw the overlay (WFB status) - also high quality
+        uint32_t *temp_buffer = calloc(display_width * display_height, sizeof(uint32_t));
+        if (temp_buffer) {
+            draw_character_map_argb(&overlay_display_info, temp_buffer, overlay_character_map);
+
+            // Combine overlay with main OSD (proper alpha blending)
+            for (int i = 0; i < display_width * display_height; i++) {
+                if (temp_buffer[i] != 0) {
+                    osd_compositor_buffer[i] = temp_buffer[i];
+                }
+            }
+            free(temp_buffer);
+        }
+
+        // Pass OSD data to compositor (now as 32-bit ARGB)
+        compositor_update_osd_argb(osd_compositor_buffer, display_width, display_height);
     }
-    drm_push_new_osd_frame();
-    //DEBUG_PRINT("drew a frame\n");
+    
     clock_gettime(CLOCK_MONOTONIC, &last_render);
 }
 
@@ -420,11 +551,18 @@ static void* msp_osd_thread(void *arg)
     struct config_t *cfg = (struct config_t *)arg;
     printf("[ MSP OSD ] Starting MSP OSD thread\n");
 
-    if (drm_get_osd_frame_size(&display_width, &display_height, &rotation) < 0) {
+    if (drm_get_overlay_frame_size(&display_width, &display_height, &rotation) < 0) {
         printf("[ MSP OSD ] Failed to get OSD frame size\n");
         return NULL;
     }
     printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
+
+    // Initialize OSD buffer for compositor (32-bit ARGB)
+    osd_compositor_buffer = calloc(display_width * display_height, sizeof(uint32_t));
+    if (osd_compositor_buffer == NULL) {
+        printf("[ MSP OSD ] Failed to allocate OSD compositor buffer\n");
+        return NULL;
+    }
 
     memset(current_fc_variant, 0, sizeof(current_fc_variant));
 
@@ -472,6 +610,12 @@ static void* msp_osd_thread(void *arg)
     }
 
     wfb_status_link_stop();
+
+    // Clean OSD buffer
+    if (osd_compositor_buffer) {
+        free(osd_compositor_buffer);
+        osd_compositor_buffer = NULL;
+    }
 
     free(display_driver);
     free(msp_state);
