@@ -1,6 +1,9 @@
 #include "menu.h"
 #include <stdio.h>
 #include <pthread.h>
+#include "../log.h"
+
+static const char *module_name_str = "MENU";
 
 // Global menu instance
 static menu_t menu = {0};
@@ -12,11 +15,11 @@ static lv_disp_t *display = NULL;
  */
 int menu_init(void)
 {
-    printf("[ MENU ] Initializing menu system...\n");
+    INFO("Initializing menu system...");
     
     display = lv_disp_get_default();
     if (!display) {
-        printf("[ MENU ] Error: No display found\n");
+        ERROR("No display found");
         return -1;
     }
     
@@ -29,7 +32,7 @@ int menu_init(void)
         menu.items[i] = NULL;
     }
     
-    printf("[ MENU ] Menu system initialized\n");
+    INFO("Menu system initialized");
     return 0;
 }
 
@@ -56,7 +59,7 @@ void menu_update_selection(void)
         lv_obj_set_style_radius(menu.items[menu.current_item], 5, LV_PART_MAIN);
     }
     
-    printf("[ MENU ] Selected item: %d\n", menu.current_item);
+    INFO("Selected item: %d", menu.current_item);
 }
 
 /**
@@ -72,11 +75,12 @@ void menu_toggle(void)
     
     if (menu.visible) {
         lv_obj_clear_flag(menu.background, LV_OBJ_FLAG_HIDDEN);
-        menu.current_item = 0; // Reset to first item
-        printf("[ MENU ] Menu shown\n");
+        menu.visible = true;
+        INFO("Menu shown");
     } else {
         lv_obj_add_flag(menu.background, LV_OBJ_FLAG_HIDDEN);
-        printf("[ MENU ] Menu hidden\n");
+        menu.visible = false;
+        INFO("Menu hidden");
     }
     
     pthread_mutex_unlock(&menu_mutex);
@@ -117,26 +121,26 @@ void menu_handle_navigation(int button_number)
             break;
             
         case 1: // A button - select/confirm
-            printf("[ MENU ] Selected menu item %d\n", menu.current_item);
+            INFO("Selected menu item %d", menu.current_item);
             if (menu.current_item == 4) { // Exit item
                 should_toggle = true;
             } else {
                 // Handle other menu items here
-                printf("[ MENU ] Executing action for item %d\n", menu.current_item);
+                INFO("Executing action for item %d", menu.current_item);
                 
                 // Add specific actions for each menu item
                 switch (menu.current_item) {
                     case 0:
-                        printf("[ MENU ] Opening Video Settings...\n");
+                        INFO("Opening Video Settings...");
                         break;
                     case 1:
-                        printf("[ MENU ] Opening WiFi Settings...\n");
+                        INFO("Opening WiFi Settings...");
                         break;
                     case 2:
-                        printf("[ MENU ] Showing System Info...\n");
+                        INFO("Showing System Info...");
                         break;
                     case 3:
-                        printf("[ MENU ] Resetting Settings...\n");
+                        INFO("Resetting Settings...");
                         break;
                 }
             }
@@ -193,21 +197,19 @@ bool menu_is_visible(void)
 void menu_create_ui(void)
 {
     if (!display) {
-        printf("[ MENU ] Error: Display not initialized\n");
+        ERROR("Display not initialized");
         return;
     }
     
     pthread_mutex_lock(&menu_mutex);
     
-    printf("[ MENU ] Creating menu UI...\n");
+    INFO("Creating menu UI...");
 
     // Get the screen dimensions
     lv_coord_t width = lv_disp_get_hor_res(display);
     lv_coord_t height = lv_disp_get_ver_res(display);
-
-    printf("[ MENU ] Creating menu UI for screen %dx%d\n", (int)width, (int)height);
-
-    // Create a semi-transparent background for the menu
+    
+    INFO("Creating menu UI for screen %dx%d", (int)width, (int)height);    // Create a semi-transparent background for the menu
     menu.background = lv_obj_create(lv_scr_act());
     lv_obj_set_size(menu.background, width - 40, height - 80);
     lv_obj_align(menu.background, LV_ALIGN_CENTER, 0, 0);
@@ -250,7 +252,7 @@ void menu_create_ui(void)
         lv_obj_set_style_pad_all(menu.items[i], 8, LV_PART_MAIN);
     }
 
-    printf("[ MENU ] Menu UI created successfully\n");
+    INFO("Menu UI created successfully");
     pthread_mutex_unlock(&menu_mutex);
 }
 
@@ -276,5 +278,5 @@ void menu_deinit(void)
     pthread_mutex_unlock(&menu_mutex);
     pthread_mutex_destroy(&menu_mutex);
     
-    printf("[ MENU ] Menu system deinitialized\n");
+    INFO("Menu system deinitialized");
 }

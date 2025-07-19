@@ -10,9 +10,12 @@
 #include "../libspng/spng.h"
 #include "font.h"
 #include "../util/debug.h"
+#include "../../log.h"
 
 #define BYTES_PER_PIXEL 4
 #define HD_FONT_WIDTH 24
+
+static const char *module_name_str = "FONT";
 
 /* Font helper methods */
 
@@ -75,17 +78,17 @@ static int open_font(const char *filename, display_info_t *display_info, const c
 
     if(ret)
     {
-        printf("spng_get_ihdr() error: %s\n", spng_strerror(ret));
+        ERROR("spng_get_ihdr() error: %s", spng_strerror(ret));
         goto err;
     }
 
     if(ihdr.height != display_info->font_height * NUM_CHARS) {
-        printf("font invalid height, got %d wanted %d\n", ihdr.height, display_info->font_height * NUM_CHARS);
+        ERROR("font invalid height, got %d wanted %d", ihdr.height, display_info->font_height * NUM_CHARS);
         goto err;
     }
 
     if(ihdr.width % display_info->font_width != 0) {
-        printf("font invalid width, not a multiple of %d\n", display_info->font_width);
+        ERROR("font invalid width, not a multiple of %d", display_info->font_width);
         goto err;
     }
 
@@ -107,7 +110,7 @@ static int open_font(const char *filename, display_info_t *display_info, const c
     void* font_data = malloc(image_size);
     ret = spng_decode_image(ctx, font_data, image_size, SPNG_FMT_RGBA8, 0);
     if(ret) {
-        printf("Failed to decode PNG!\n");
+        ERROR("Failed to decode PNG!");
         free(font_data);
         goto err;
     }

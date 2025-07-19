@@ -24,6 +24,7 @@
  * Created vitalii.nimych@gmail.com 30-06-2025
  */
 #include "decoder.h"
+#include "log.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,6 +46,8 @@
 #include "src/drm_display.h"
 
 #define DECODER_DEBUG 0
+
+static const char *module_name_str = "DECODER";
 
 static pthread_t decoder_thread;
 static atomic_int decoder_running = 0;
@@ -86,7 +89,7 @@ uint64_t get_time_ms()
 static int decoder_buff_init_internal(int w, int h, MppFrameFormat format)
 {
     if ((format != MPP_FMT_YUV420SP) && (format != MPP_FMT_YUV420SP_10BIT)) {
-        printf("[ DECODER ] Unsupported format : %d\n", format);
+        ERROR_M("DECODER", "Unsupported format : %d", format);
         return -1;
     }
     video_frame_info.width = w;
@@ -103,7 +106,7 @@ static int decoder_buff_init_internal(int w, int h, MppFrameFormat format)
     // 1. Create internal buffer group (ION/Normal type)
     MPP_RET ret = mpp_buffer_group_get_internal(&frm_grp, MPP_BUFFER_TYPE_ION); // or MPP_BUFFER_TYPE_NORMAL
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to get internal buffer group: %d\n", ret);
+        ERROR("Failed to get internal buffer group: %d", ret);
         return -1;
     }
 
@@ -118,7 +121,7 @@ static int decoder_buff_init_internal(int w, int h, MppFrameFormat format)
         MppBuffer buf = NULL;
         ret = mpp_buffer_get(frm_grp, &buf, frame_buf_size);
         if (ret != MPP_OK) {
-            printf("[ DECODER ] Failed to alloc mpp_buffer %d\n", i);
+            ERROR("Failed to alloc mpp_buffer %d", i);
             return -1;
         }
         // Optionally store pointers to buffers if you need direct access
@@ -128,18 +131,18 @@ static int decoder_buff_init_internal(int w, int h, MppFrameFormat format)
     // 4. Attach group to decoder (MPP_DEC_SET_EXT_BUF_GROUP for internal)
     ret = mpi->control(ctx, MPP_DEC_SET_EXT_BUF_GROUP, frm_grp);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to set external buffer group: %d\n", ret);
+        ERROR("Failed to set external buffer group: %d", ret);
         return -1;
     }
 
     // 5. Inform decoder that new buffers are ready (info change ack)
     ret = mpi->control(ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to set info change ready: %d\n", ret);
+        ERROR("Failed to set info change ready: %d", ret);
         return -1;
     }
 
-    printf("[ DECODER ] Internal buffer group initialized for %dx%d (stride %dx%d), %d buffers\n",
+    INFO("Internal buffer group initialized for %dx%d (stride %dx%d), %d buffers",
            video_frame_info.width, video_frame_info.height, video_frame_info.hor_stride, video_frame_info.ver_stride, num_buffers);
 
     return 0;
@@ -173,7 +176,7 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
         video_frame_info.size = video_frame_info.hor_stride * video_frame_info.ver_stride * 4;
         break;
     default:
-        printf("[ DECODER ] Unsupported format: %d\n", format);
+        ERROR("Unsupported format: %d", format);
         return -1;
     }
 
@@ -192,7 +195,7 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
     // Create DMA-HEAP internal buffer group for MPP
     MPP_RET ret = mpp_buffer_group_get_internal(&frm_grp, MPP_BUFFER_TYPE_DMA_HEAP);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to get DMA-HEAP buffer group: %d\n", ret);
+        ERROR("Failed to get DMA-HEAP buffer group: %d", ret);
         return -1;
     }
 
@@ -201,28 +204,28 @@ static int decoder_buff_init_dma_heap(int w, int h, MppFrameFormat format)
         MppBuffer buf = NULL;
         ret = mpp_buffer_get(frm_grp, &buf, video_frame_info.size);
         if (ret != MPP_OK) {
-            printf("[ DECODER ] Failed to allocate mpp_buffer %d\n", i);
+            ERROR("Failed to allocate mpp_buffer %d", i);
             return -1;
         }
-        printf("[ DECODER ] Allocated DMA buffer [%d] fd: %d with size: %zu\n", i, mpp_buffer_get_fd(buf), video_frame_info.size);
+        DEBUG("Allocated DMA buffer [%d] fd: %d with size: %zu", i, mpp_buffer_get_fd(buf), video_frame_info.size);
         // No need to keep MppBuffer pointer here: buffer group owns them
     }
 
     // Attach buffer group to decoder
     ret = mpi->control(ctx, MPP_DEC_SET_EXT_BUF_GROUP, frm_grp);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to set external buffer group: %d\n", ret);
+        ERROR("Failed to set external buffer group: %d", ret);
         return -1;
     }
 
     // Inform decoder that new buffers are ready
     ret = mpi->control(ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] Failed to set info change ready: %d\n", ret);
+        ERROR("Failed to set info change ready: %d", ret);
         return -1;
     }
 
-    printf("[ DECODER ] DMA-HEAP buffer group initialized for %dx%d (stride %dx%d), %d buffers\n",
+    INFO("DMA-HEAP buffer group initialized for %dx%d (stride %dx%d), %d buffers",
            w, h, video_frame_info.hor_stride, video_frame_info.ver_stride, num_buffers);
 
     return 0;
@@ -236,12 +239,12 @@ void decoder_release_buffers(void)
         frm_grp = NULL;
     }
 
-    printf("[ DECODER ] Released decoder buffers\n");
+    INFO("Released decoder buffers");
 }
 
 static void* decoder_thread_func(void* arg)
 {
-    printf("[ DECODER ] Decoder thread started\n");
+    INFO("Decoder thread started");
     (void)arg;
     int first_frames = 0;
 
@@ -255,7 +258,7 @@ static void* decoder_thread_func(void* arg)
                 int width = mpp_frame_get_width(frame);
                 int height = mpp_frame_get_height(frame);
                 MppFrameFormat fmt = mpp_frame_get_fmt(frame);
-                printf("[ DECODER ] Info change: %dx%d fmt=%d\n", width, height, fmt);
+                INFO("Info change: %dx%d fmt=%d", width, height, fmt);
                 // (Re)allocate buffers for new resolution/format
                 //decoder_buff_init_internal(width, height, fmt); // If you want to use internal buffers (ION/Normal type)
                 // For DMA-HEAP buffers
@@ -265,7 +268,7 @@ static void* decoder_thread_func(void* arg)
 
             } else if (mpp_frame_get_eos(frame)) {
                 // End-of-stream received: stop decoding loop
-                printf("[ DECODER ] EOS\n");
+                INFO("EOS");
                 atomic_store(&decoder_running, 0);
                 mpp_frame_deinit(&frame);
             } else {
@@ -286,7 +289,7 @@ static void* decoder_thread_func(void* arg)
                 sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE;
                 ioctl(dma_fd, DMA_BUF_IOCTL_SYNC, &sync);
 #if DECODER_DEBUG
-                printf("[ DECODER ] Frame ready: %dx%d, stride(%dx%d) dma_fd=%d\n", width, height, hor_stride, ver_stride, dma_fd);
+                DEBUG("Frame ready: %dx%d, stride(%dx%d) dma_fd=%d", width, height, hor_stride, ver_stride, dma_fd);
 #endif
                 drm_push_new_video_frame(dma_fd, width, height, hor_stride, ver_stride);
                 mpp_frame_deinit(&frame);
@@ -304,7 +307,7 @@ static void* decoder_thread_func(void* arg)
                 if (now - last_fps_time >= 1000) {
                     current_fps = frames_in_sec * 1000.0 / (now - last_fps_time);
 #if DECODER_DEBUG
-                    printf("[ DECODER ] FPS: %.2f\n", current_fps);
+                    DEBUG("FPS: %.2f", current_fps);
 #endif
                     frames_in_sec = 0;
                     last_fps_time = now;
@@ -318,7 +321,7 @@ static void* decoder_thread_func(void* arg)
 
     decoder_release_buffers();
 
-    printf("[ DECODER ] Decoder thread exiting\n");
+    INFO("Decoder thread exiting");
 
     return NULL;
 }
@@ -327,30 +330,30 @@ int decoder_start(struct config_t *cfg)
 {
 
     if (cfg == NULL) {
-        printf("[ DECODER ] Configuration is NULL\n");
+        ERROR("Configuration is NULL");
         return -1;
     }
 
     if (cfg->codec == CODEC_H265) {
-        printf("[ DECODER ] Using H.265 codec\n");
+        INFO("Using H.265 codec");
         type = MPP_VIDEO_CodingHEVC;
     } else if (cfg->codec == CODEC_H264) {
-        printf("[ DECODER ] Using H.264 codec\n");
+        INFO("Using H.264 codec");
         type = MPP_VIDEO_CodingAVC;
     } else {
-        printf("[ DECODER ] Unsupported codec: %d\n", cfg->codec);
+        ERROR("Unsupported codec: %d", cfg->codec);
         return -1;
     }
 
     MPP_RET ret = mpp_create(&ctx, &mpi);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] mpp_create failed: %d\n", ret);
+        ERROR("mpp_create failed: %d", ret);
         return -1;
     }
 
     ret = mpp_init(ctx, MPP_CTX_DEC, type);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] mpp_init failed: %d\n", ret);
+        ERROR("mpp_init failed: %d", ret);
         mpp_destroy(ctx);
         return -1;
     }
@@ -359,7 +362,7 @@ int decoder_start(struct config_t *cfg)
     mpp_dec_cfg_init(&mpp_cfg);
     ret = mpi->control(ctx, MPP_DEC_GET_CFG, mpp_cfg);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_GET_CFG failed: %d\n", ret);
+        ERROR("MPP_DEC_GET_CFG failed: %d", ret);
         mpp_destroy(ctx);
         return -1;
     }
@@ -368,7 +371,7 @@ int decoder_start(struct config_t *cfg)
     ret = mpp_dec_cfg_set_u32(mpp_cfg, "base:split_parse", need_split);
     ret |= mpp_dec_cfg_set_u32(mpp_cfg, "base:fast_parse", 1);
     if (ret) {
-        printf("[ DECODER ] mpp_dec_cfg_set_u32 failed: %d\n", ret);
+        ERROR("mpp_dec_cfg_set_u32 failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -377,7 +380,7 @@ int decoder_start(struct config_t *cfg)
     int mpp_split_mode = 1; // Enable split mode
     ret = mpi->control(ctx, MPP_DEC_SET_PARSER_SPLIT_MODE, &mpp_split_mode);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_PARSER_SPLIT_MODE failed: %d\n", ret);
+        ERROR("MPP_DEC_SET_PARSER_SPLIT_MODE failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -386,7 +389,7 @@ int decoder_start(struct config_t *cfg)
     int disable_error = 1; // Disable error handling
     ret = mpi->control(ctx, MPP_DEC_SET_DISABLE_ERROR, &disable_error);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_DISABLE_ERROR failed: %d\n", ret);
+        ERROR("MPP_DEC_SET_DISABLE_ERROR failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -395,7 +398,7 @@ int decoder_start(struct config_t *cfg)
     int immediate_out = 1; // Enable immediate output
     ret = mpi->control(ctx, MPP_DEC_SET_IMMEDIATE_OUT, &immediate_out);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_IMMEDIATE_OUT failed: %d\n", ret);
+        ERROR("MPP_DEC_SET_IMMEDIATE_OUT failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -404,7 +407,7 @@ int decoder_start(struct config_t *cfg)
     int fast_play = 1; // Enable fast play mode
     ret = mpi->control(ctx, MPP_DEC_SET_ENABLE_FAST_PLAY, &fast_play);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_ENABLE_FAST_PLAY failed: %d\n", ret);
+        ERROR("MPP_DEC_SET_ENABLE_FAST_PLAY failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -413,7 +416,7 @@ int decoder_start(struct config_t *cfg)
     int fast_mode = 1;
     ret = mpi->control(ctx, MPP_DEC_SET_PARSER_FAST_MODE, &fast_mode);
     if (ret) {
-        printf("[ DECODER ] MPP_DEC_SET_PARSER_FAST_MODE failed: %d\n", ret);
+        ERROR("MPP_DEC_SET_PARSER_FAST_MODE failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -428,7 +431,7 @@ int decoder_start(struct config_t *cfg)
     RK_S64 block = 10; // 10 ms timeout for input/output operations for catch signals
     ret = mpi->control(ctx, MPP_SET_INPUT_TIMEOUT, &block);
     if (ret) {
-        printf("[ DECODER ] MPP_SET_INPUT_TIMEOUT failed: %d\n", ret);
+        ERROR("MPP_SET_INPUT_TIMEOUT failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
@@ -436,22 +439,22 @@ int decoder_start(struct config_t *cfg)
 
     ret = mpi->control(ctx, MPP_SET_OUTPUT_TIMEOUT, &block);
     if (ret) {
-        printf("[ DECODER ] MPP_SET_OUTPUT_BLOCK failed: %d\n", ret);
+        ERROR("MPP_SET_OUTPUT_BLOCK failed: %d", ret);
         mpp_dec_cfg_deinit(mpp_cfg);
         mpp_destroy(ctx);
         return -1;
     }
 
-    printf("[ DECODER ] Decoder initialized with all parameters: split: %d"
+    INFO("Decoder initialized with all parameters: split: %d"
            " disable_error: %d"
            " immediate_out: %d"
            " fast_play: %d"
-           " fast_mode: %d\n",
+           " fast_mode: %d",
            mpp_split_mode, disable_error, immediate_out, fast_play, fast_mode);
 
     atomic_store(&decoder_running, 1);
     if (pthread_create(&decoder_thread, NULL, decoder_thread_func, NULL)) {
-        printf("[ DECODER ] Can't create decode thread\n");
+        ERROR("Can't create decode thread");
         atomic_store(&decoder_running, 0);
         mpp_destroy(ctx);
         ctx = NULL;
@@ -468,14 +471,14 @@ int decoder_put_frame(struct config_t *cfg, void *data, int size)
 
     (void)cfg; // Unused parameter, can be removed if not needed
     if (ctx == NULL || mpi == NULL) {
-        printf("[ DECODER ] Decoder not initialized\n");
+        ERROR("Decoder not initialized");
         return -1;
     }
 
     MppPacket packet;
     MPP_RET ret = mpp_packet_init(&packet, data, size);
     if (ret != MPP_OK) {
-        printf("[ DECODER ] mpp_packet_init failed: %d\n", ret);
+        ERROR("mpp_packet_init failed: %d", ret);
         return -1;
     }
 
@@ -487,11 +490,11 @@ int decoder_put_frame(struct config_t *cfg, void *data, int size)
 
     uint64_t data_feed_begin = get_time_ms();
     while (MPP_OK != (ret = mpi->decode_put_packet(ctx, packet))) {
-        printf("[ DECODER ] decode_put_packet returned %d, retrying...\n", ret);
+        WARN("decode_put_packet returned %d, retrying...", ret);
         uint64_t elapsed = get_time_ms() - data_feed_begin;
         if (elapsed > 100) {
             decoder_stalled_count++;
-            printf("[ DRM ] Cannot feed decoder, stalled %d \n?", decoder_stalled_count);
+            ERROR("Cannot feed decoder, stalled %d", decoder_stalled_count);
             mpp_packet_deinit(&packet);
             return -1;
         }
@@ -506,7 +509,7 @@ int decoder_put_frame(struct config_t *cfg, void *data, int size)
 int decoder_stop(void)
 {
     if (ctx == NULL || mpi == NULL) {
-        printf("[ DECODER ] Decoder not initialized or already stopped\n");
+        ERROR("Decoder not initialized or already stopped");
         return -1;
     }
     atomic_store(&decoder_running, 0);
@@ -515,6 +518,6 @@ int decoder_stop(void)
     mpp_destroy(mpi);
     type = MPP_VIDEO_CodingUnused;
 
-    printf("[ DECODER ] decoder stopped\n");
+    INFO("decoder stopped");
     return 0;
 }

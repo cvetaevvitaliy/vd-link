@@ -1,9 +1,12 @@
 #include "compositor.h"
 #include "../drm_display.h"
+#include "../log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+
+static const char *module_name_str = "COMPOSITOR";
 
 // Compositor state
 static struct {
@@ -63,7 +66,7 @@ int compositor_init(int width, int height, int rotation)
     compositor.osd_argb_layer = (uint32_t*)calloc(width * height, sizeof(uint32_t));
     
     if (!compositor.composite_buffer || !compositor.ui_layer || !compositor.osd_layer || !compositor.osd_argb_layer) {
-        fprintf(stderr, "[ COMPOSITOR ] Failed to allocate buffers\n");
+        ERROR("Failed to allocate buffers");
         compositor_deinit();
         pthread_mutex_unlock(&compositor.compositor_mutex);
         return -1;
@@ -73,7 +76,7 @@ int compositor_init(int width, int height, int rotation)
     compositor.ui_dirty = false;
     compositor.osd_dirty = false;
     
-    printf("[ COMPOSITOR ] Initialized with %dx%d resolution, rotation %d°, output %dx%d\n", 
+    INFO("Initialized with %dx%d resolution, rotation %d°, output %dx%d", 
            width, height, rotation, compositor.output_width, compositor.output_height);
     
     pthread_mutex_unlock(&compositor.compositor_mutex);
@@ -293,7 +296,7 @@ void compositor_deinit(void)
     compositor.ui_dirty = false;
     compositor.osd_dirty = false;
     
-    printf("[ COMPOSITOR ] Deinitialized\n");
+    INFO("Deinitialized");
     
     pthread_mutex_unlock(&compositor.compositor_mutex);
 }

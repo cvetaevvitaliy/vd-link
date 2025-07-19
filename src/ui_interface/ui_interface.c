@@ -1,6 +1,7 @@
 #include "ui_interface.h"
 #include "compositor.h"
 #include "menu.h"
+#include "../log.h"
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -67,7 +68,7 @@ static void* joystick_reader_thread(void* arg)
 {
     struct js_event event;
     
-    printf("[ JOYSTICK ] Starting joystick reader thread\n");
+    INFO_M("JOYSTICK", "Starting joystick reader thread");
     
     while (joystick_running) {
         if (joystick_fd < 0) {
@@ -77,7 +78,7 @@ static void* joystick_reader_thread(void* arg)
                 usleep(1000000); // Wait 1 second before retry
                 continue;
             }
-            printf("[ JOYSTICK ] Connected to /dev/input/js0\n");
+            INFO_M("JOYSTICK", "Connected to /dev/input/js0");
         }
         
         ssize_t bytes = read(joystick_fd, &event, sizeof(event));
@@ -92,7 +93,7 @@ static void* joystick_reader_thread(void* arg)
                         snprintf(current_button_text, sizeof(current_button_text), 
                                 "BTN%d", event.number);
                     }
-                    printf("[ JOYSTICK ] Button %d (%s) pressed\n", 
+                    INFO_M("JOYSTICK", "Button %d (%s) pressed", 
                            event.number, current_button_text);
                     
                     // Handle menu navigation
@@ -100,7 +101,7 @@ static void* joystick_reader_thread(void* arg)
                     
                 } else { // Button released
                     strcpy(current_button_text, "none");
-                    printf("[ JOYSTICK ] Button %d released\n", event.number);
+                    INFO_M("JOYSTICK", "Button %d released", event.number);
                 }
                 
                 // Update UI element if it exists
@@ -123,7 +124,7 @@ static void* joystick_reader_thread(void* arg)
         } else if (bytes < 0) {
             // No data available or error
             if (errno == ENODEV) {
-                printf("[ JOYSTICK ] Device disconnected\n");
+                INFO_M("JOYSTICK", "Device disconnected");
                 close(joystick_fd);
                 joystick_fd = -1;
             }
@@ -136,7 +137,7 @@ static void* joystick_reader_thread(void* arg)
         joystick_fd = -1;
     }
     
-    printf("[ JOYSTICK ] Joystick reader thread stopped\n");
+    INFO_M("JOYSTICK", "Joystick reader thread stopped");
     return NULL;
 }
 
@@ -148,13 +149,13 @@ static int init_joystick(void)
     joystick_running = true;
     
     if (pthread_create(&joystick_thread, NULL, joystick_reader_thread, NULL) != 0) {
-        fprintf(stderr, "[ JOYSTICK ] Failed to create joystick thread\n");
+        ERROR_M("JOYSTICK", "Failed to create joystick thread");
         joystick_running = false;
         return -1;
     }
     
     pthread_detach(joystick_thread);
-    printf("[ JOYSTICK ] Joystick handling initialized\n");
+    INFO_M("JOYSTICK", "Joystick handling initialized");
     return 0;
 }
 
@@ -170,7 +171,7 @@ static void cleanup_joystick(void)
         joystick_fd = -1;
     }
     
-    printf("[ JOYSTICK ] Joystick handling cleaned up\n");
+    INFO_M("JOYSTICK", "Joystick handling cleaned up");
 }
 
 /**
@@ -220,7 +221,7 @@ static void update_battery_charge(lv_timer_t *t)
         if (fscanf(capacity_file, "%d", &capacity) == 1) {
             ui_values.battery = capacity; // Update battery percentage
         } else {
-            fprintf(stderr, "Failed to read battery capacity\n");
+            ERROR_M("BATTERY", "Failed to read battery capacity");
         }
         fclose(capacity_file);
     }
@@ -386,10 +387,10 @@ static int tick_init(void)
 
 int ui_interface_init(void)
 {
-    printf("[ UI ] Initializing LVGL interface...\n");
+    INFO_M("UI", "Initializing LVGL interface...");
     int ui_width, ui_height, ui_rotate;
     if (drm_get_overlay_frame_size(&ui_width, &ui_height, &ui_rotate) != 0) {
-        fprintf(stderr, "[ LVGL ] Failed to get UI frame size\n");
+        ERROR_M("LVGL", "Failed to get UI frame size");
         return -1;
     }
     
@@ -407,7 +408,7 @@ int ui_interface_init(void)
     
     // Initialize compositor and LVGL
     if (compositor_init(ui_width, ui_height, ui_rotate) != 0) {
-        fprintf(stderr, "[ LVGL ] Failed to initialize compositor\n");
+        ERROR_M("LVGL", "Failed to initialize compositor");
         return -1;
     }
     
@@ -418,7 +419,7 @@ int ui_interface_init(void)
     buf1 = (lv_color_t *)malloc(buf_size);
     buf2 = (lv_color_t *)malloc(buf_size);
     if (buf1 == NULL || buf2 == NULL) {
-        fprintf(stderr, "[ LVGL ] Failed to allocate display buffers\n");
+        ERROR_M("LVGL", "Failed to allocate display buffers");
         if (buf1) free(buf1);
         if (buf2) free(buf2);
         buf1 = buf2 = NULL;
@@ -441,7 +442,7 @@ int ui_interface_init(void)
     // Register the driver
     disp = lv_disp_drv_register(&disp_drv);
     if (disp == NULL) {
-        fprintf(stderr, "[ LVGL ] Failed to register display driver\n");
+        ERROR_M("LVGL", "Failed to register display driver");
         free(buf1);
         free(buf2);
         buf1 = buf2 = NULL;
@@ -452,7 +453,7 @@ int ui_interface_init(void)
     // Create a thread for LVGL tick
     pthread_t tick_thread;
     if (pthread_create(&tick_thread, NULL, (void *)tick_init, NULL) != 0) {
-        fprintf(stderr, "[ LVGL ] Failed to create tick thread\n");
+        ERROR_M("LVGL", "Failed to create tick thread");
         free(buf1);
         free(buf2);
         buf1 = buf2 = NULL;
@@ -464,7 +465,7 @@ int ui_interface_init(void)
     // Initialize joystick handling
     init_joystick();
     
-    printf("[ LVGL ] Initialized successfully with %dx%d LVGL resolution (DRM: %dx%d, rotation: %d°) using compositor\n", 
+    INFO_M("LVGL", "Initialized successfully with %dx%d LVGL resolution (DRM: %dx%d, rotation: %d°) using compositor", 
            lvgl_width, lvgl_height, ui_width, ui_height, ui_rotate);
     return 0;
 }
@@ -536,7 +537,7 @@ void ui_interface_deinit(void)
     // Clean up compositor
     compositor_deinit();
     
-    printf("[ LVGL ] Deinitialized\n");
+    INFO_M("LVGL", "Deinitialized");
 }
 
 /**
@@ -545,7 +546,7 @@ void ui_interface_deinit(void)
 static lv_timer_t* create_tracked_timer(lv_timer_cb_t timer_cb, uint32_t period, void *user_data)
 {
     if (timer_count >= MAX_TIMERS) {
-        printf("[ LVGL ] Warning: Maximum number of timers reached\n");
+        WARN_M("LVGL", "Maximum number of timers reached");
         return NULL;
     }
     
@@ -572,11 +573,11 @@ void lvgl_create_ui(void)
 
     const lv_font_t *default_font = &lv_font_montserrat_20;
 
-    printf("[ UI ] Creating HUD UI...\n");
+    INFO_M("UI", "Creating HUD UI...");
 
     // Check if display is initialized
     if (!disp) {
-        printf("[ LVGL ] Display not initialized, cannot create UI\n");
+        ERROR_M("LVGL", "Display not initialized, cannot create UI");
         pthread_mutex_unlock(&lvgl_mutex);
         return;
     }
@@ -584,17 +585,15 @@ void lvgl_create_ui(void)
     // Get the screen dimensions from our registered display
     lv_coord_t width = lv_disp_get_hor_res(disp);
     lv_coord_t height = lv_disp_get_ver_res(disp);
-
-    printf("[ LVGL ] Creating drone camera HUD UI for screen %dx%d\n", (int)width, (int)height);
-
-    // Force a full screen refresh before creating UI
+    
+    INFO_M("LVGL", "Creating drone camera HUD UI for screen %dx%d", (int)width, (int)height);    // Force a full screen refresh before creating UI
     lv_obj_invalidate(lv_scr_act());
 
     // Set semi-transparent background for HUD overlay (not fully transparent)
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_10, LV_PART_MAIN);
     lv_obj_set_style_bg_color(lv_scr_act(), lv_color_make(0, 0, 0), LV_PART_MAIN);
     
-    printf("[ LVGL ] Screen background set\n");
+    INFO_M("LVGL", "Screen background set");
 
     // Create top status bar
     lv_obj_t *top_bar = lv_obj_create(lv_scr_act());
@@ -606,7 +605,7 @@ void lvgl_create_ui(void)
     lv_obj_set_style_border_color(top_bar, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_radius(top_bar, 5, LV_PART_MAIN);
     mark_static_object(top_bar);
-    printf("[ LVGL ] Top bar created\n");
+    INFO_M("LVGL", "Top bar created");
 
     // Battery indicator (top left)
     ui_elements.battery_charge = lv_label_create(top_bar);
@@ -670,7 +669,7 @@ void lvgl_create_ui(void)
     // lv_obj_set_style_text_color(rec_label, lv_color_make(255, 0, 0), LV_PART_MAIN);
     // mark_static_object(rec_label);
 
-    printf("[ LVGL ] Drone HUD UI created successfully\n");
+    INFO_M("LVGL", "Drone HUD UI created successfully");
     pthread_mutex_unlock(&lvgl_mutex);
 
     lvgl_create_menu();
@@ -681,11 +680,11 @@ void lvgl_create_menu()
 {
     pthread_mutex_lock(&lvgl_mutex);
 
-    printf("[ LVGL ] Creating menu UI...\n");
+    INFO_M("LVGL", "Creating menu UI...");
 
     // Check if display is initialized
     if (!disp) {
-        printf("[ LVGL ] Display not initialized, cannot create menu UI\n");
+        ERROR_M("LVGL", "Display not initialized, cannot create menu UI");
         pthread_mutex_unlock(&lvgl_mutex);
         return;
     }
@@ -694,12 +693,12 @@ void lvgl_create_menu()
     lv_coord_t width = lv_disp_get_hor_res(disp);
     lv_coord_t height = lv_disp_get_ver_res(disp);
 
-    printf("[ LVGL ] Initializing menu\n");
+    INFO_M("LVGL", "Initializing menu");
     
     // Initialize and create menu
     menu_init();
     menu_create_ui();
     
-    printf("[ LVGL ] Menu initialized successfully\n");
+    INFO_M("LVGL", "Menu initialized successfully");
     pthread_mutex_unlock(&lvgl_mutex);
 }

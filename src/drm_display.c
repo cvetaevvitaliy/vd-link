@@ -48,7 +48,9 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <linux/dma-buf.h>
+#include "log.h"
 
+static const char *module_name_str = "DRM";
 #define DRM_DEBUG 0
 #define DRM_DEBUG_ROTATE 0
 
@@ -141,16 +143,15 @@ static void drm_print_modes(struct drm_context_t *drm_ctx)
 
     res = drmModeGetResources(drm_ctx->drm_fd);
     if (!res) {
-        fprintf(stderr, "[ DRM ] cannot retrieve DRM resources (%d): %m\n",
-                errno);
+        ERROR("cannot retrieve DRM resources (%d): %m", errno);
         return;
     }
 
     for (int i = 0; i < res->count_connectors; ++i) {
         conn = drmModeGetConnector(drm_ctx->drm_fd, res->connectors[i]);
         if (!conn) {
-            fprintf(stderr, "[ DRM ] cannot retrieve DRM connector %u:%u (%d): %m\n",
-                    i, res->connectors[i], errno);
+            ERROR("cannot retrieve DRM connector %u:%u (%d): %m",
+                  i, res->connectors[i], errno);
             continue;
         }
         for (int i = 0; i < conn->count_modes; i++) {
@@ -158,7 +159,7 @@ static void drm_print_modes(struct drm_context_t *drm_ctx)
             // Assuming modes list is sorted
             if (info.hdisplay == prev_h && info.vdisplay == prev_v && info.vrefresh == prev_refresh)
                 continue;
-            printf("[ DRM ] Found display: %dx%d@%d\n", info.hdisplay, info.vdisplay, info.vrefresh);
+            INFO("Found display: %dx%d@%d\n", info.hdisplay, info.vdisplay, info.vrefresh);
             prev_h = info.hdisplay;
             prev_v = info.vdisplay;
             prev_refresh = info.vrefresh;
@@ -167,7 +168,7 @@ static void drm_print_modes(struct drm_context_t *drm_ctx)
         drmModeFreeConnector(conn);
     }
     if (!at_least_one) {
-        fprintf(stderr, "[ DRM ] No displays found\n");
+        ERROR("No displays found");
     }
     drmModeFreeResources(res);
 }
@@ -177,7 +178,7 @@ static int drm_find_crct(struct drm_context_t *drm_ctx, drmModeRes *res)
     for (unsigned int i = 0; i < res->count_crtcs; ++i) {
         drmModeCrtc *crtc = drmModeGetCrtc(drm_ctx->drm_fd, res->crtcs[i]);
         if (!crtc) {
-            fprintf(stderr, "[ DRM ] cannot retrieve CRTC %u (%d): %m\n", res->crtcs[i], errno);
+            ERROR("cannot retrieve CRTC %u (%d): %m", res->crtcs[i], errno);
             continue;
         }
         if (crtc->mode_valid && crtc->mode.hdisplay == drm_ctx->connector->modes[0].hdisplay && crtc->mode.vdisplay ==  drm_ctx->connector->modes[0].vdisplay) {
@@ -196,11 +197,11 @@ static int drm_find_plane(struct drm_context_t *drm_ctx, uint32_t plane_format)
     bool found_plane = false;
     int ret = -1;
 
-    printf("[ DRM ] Searching for plane with format %s\n", drmGetFormatName(plane_format));
+    INFO("Searching for plane with format %s", drmGetFormatName(plane_format));
 
     plane_res = drmModeGetPlaneResources(drm_ctx->drm_fd);
     if (!plane_res) {
-        fprintf(stderr, "[ DRM ] drmModeGetPlaneResources failed: %s\n", strerror(errno));
+        ERROR("drmModeGetPlaneResources failed: %s", strerror(errno));
         return -1;
     }
 
@@ -209,16 +210,16 @@ static int drm_find_plane(struct drm_context_t *drm_ctx, uint32_t plane_format)
 
         drmModePlanePtr plane = drmModeGetPlane(drm_ctx->drm_fd, plane_id);
         if (!plane) {
-            fprintf(stderr, "[ DRM ] drmModeGetPlane(%u) failed: %s\n", plane_id, strerror(errno));
+            ERROR("drmModeGetPlane(%u) failed: %s", plane_id, strerror(errno));
             continue;
         }
 
         if (plane->possible_crtcs & (1 << 0)) { // Assuming we are looking for the first CRTC
             for (int j = 0; j < plane->count_formats; j++) {
-                //printf("[ DRM ] Checking plane %d format %s\n", plane_id, drmGetFormatName(plane->formats[j]));
+                //DEBUG("Checking plane %d format %s", plane_id, drmGetFormatName(plane->formats[j]));
                 if (plane->formats[j] == plane_format) {
                     found_plane = true;
-                    printf("[ DRM ] Found plane %d with format %s\n", plane_id, drmGetFormatName(plane_format));
+                    INFO("Found plane %d with format %s", plane_id, drmGetFormatName(plane_format));
                     ret = plane_id;
                     drmModeFreePlaneResources(plane_res);
                     return ret;
@@ -229,7 +230,7 @@ static int drm_find_plane(struct drm_context_t *drm_ctx, uint32_t plane_format)
         drmModeFreePlane(plane);
     }
 
-    printf("[ DRM ] No suitable plane found for format %s\n", drmGetFormatName(plane_format));
+    ERROR("No suitable plane found for format %s", drmGetFormatName(plane_format));
 
     drmModeFreePlaneResources(plane_res);
 
@@ -245,19 +246,19 @@ static int drm_modeset(struct drm_context_t *drm_ctx)
 
     res = drmModeGetResources(drm_ctx->drm_fd);
     if (!res) {
-        fprintf(stderr, "[ DRM ] cannot retrieve DRM resources (%d): %m\n", errno);
+        ERROR("Cannot retrieve DRM resources (%d): %m", errno);
         return -errno;
     }
 
     for (i = 0; i < res->count_connectors; ++i) {
         drm_ctx->connector = drmModeGetConnector(drm_ctx->drm_fd, res->connectors[i]);
         if (!drm_ctx->connector) {
-            fprintf(stderr, "[ DRM ] cannot retrieve DRM connector %u:%u (%d): %m\n", i, res->connectors[i], errno);
+            ERROR("cannot retrieve DRM connector %u:%u (%d): %m", i, res->connectors[i], errno);
             continue;
         }
 
         if (drm_ctx->connector->connection == DRM_MODE_CONNECTED && drm_ctx->connector->count_modes > 0) {
-            printf("[ DRM ] Using connector %d with mode %dx%d@%d clock %d\n",
+            INFO("Using connector %d with mode %dx%d@%d clock %d",
                    drm_ctx->connector->connector_id,
                    drm_ctx->connector->modes[0].hdisplay,
                    drm_ctx->connector->modes[0].vdisplay,
@@ -288,17 +289,17 @@ static int drm_modeset(struct drm_context_t *drm_ctx)
 
     if (!drm_ctx->connector) {
         drmModeFreeResources(res);
-        fprintf(stderr, "[ DRM ] No connected connector found!\n");
+        ERROR("No connected connector found!");
         return -ENODEV;
     }
 
     drm_ctx->crtc = drmModeGetCrtc(drm_ctx->drm_fd, res->crtcs[0]);
     if (!drm_ctx->crtc) {
-        fprintf(stderr, "[ DRM ] Failed to get first available CRTC (id=%u)\n", res->crtcs[0]);
+        ERROR("Failed to get first available CRTC (id=%u)", res->crtcs[0]);
         drmModeFreeResources(res);
         return -ENODEV;
     }
-    printf("[ DRM ] Using CRTC %d for connector %d\n", drm_ctx->crtc->crtc_id, drm_ctx->connector->connector_id);
+    INFO("Using CRTC %d for connector %d", drm_ctx->crtc->crtc_id, drm_ctx->connector->connector_id);
 
     drmModeFreeResources(res);
 
@@ -309,7 +310,7 @@ static int drm_create_dumb_argb8888_fb(struct drm_context_t *ctx, int width, int
 {
     struct drm_mode_create_dumb creq = { .width = width, .height = height, .bpp = 32 };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_CREATE_DUMB");
+        ERROR("DRM_IOCTL_MODE_CREATE_DUMB");
         return -1;
     }
     struct drm_mode_fb_cmd2 cmd = {
@@ -319,7 +320,7 @@ static int drm_create_dumb_argb8888_fb(struct drm_context_t *ctx, int width, int
             .offsets = {0}
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &cmd) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2 (ARGB8888)");
+        ERROR("DRM_IOCTL_MODE_ADDFB2 (ARGB8888)");
         return -1;
     }
     fb->fb_id = cmd.fb_id;
@@ -329,12 +330,12 @@ static int drm_create_dumb_argb8888_fb(struct drm_context_t *ctx, int width, int
     fb->size = creq.size;
     struct drm_mode_map_dumb mreq = { .handle = creq.handle };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_MAP_DUMB");
+        ERROR("DRM_IOCTL_MODE_MAP_DUMB");
         return -1;
     }
     fb->buff_addr = mmap(0, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, ctx->drm_fd, mreq.offset);
     if (fb->buff_addr == MAP_FAILED) {
-        perror("[ DRM ] mmap ARGB8888 dumb");
+        ERROR("mmap ARGB8888 dumb");
         return -1;
     }
     return 0;
@@ -344,7 +345,7 @@ static int drm_create_dumb_nv12_fb(struct drm_context_t *ctx, int width, int hei
 {
     struct drm_mode_create_dumb creq = { .width = width, .height = height * 3 / 2, .bpp = 8 };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_CREATE_DUMB (NV12)");
+        ERROR("DRM_IOCTL_MODE_CREATE_DUMB (NV12)");
         return -1;
     }
     struct drm_mode_fb_cmd2 cmd = {
@@ -354,7 +355,7 @@ static int drm_create_dumb_nv12_fb(struct drm_context_t *ctx, int width, int hei
             .offsets = {0, width*height}
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &cmd) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2 (NV12)");
+        ERROR("DRM_IOCTL_MODE_ADDFB2 (NV12)");
         return -1;
     }
     fb->fb_id = cmd.fb_id;
@@ -366,12 +367,12 @@ static int drm_create_dumb_nv12_fb(struct drm_context_t *ctx, int width, int hei
     fb->size = creq.size;
     struct drm_mode_map_dumb mreq = { .handle = creq.handle };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_MAP_DUMB (NV12)");
+        ERROR("DRM_IOCTL_MODE_MAP_DUMB (NV12)");
         return -1;
     }
     fb->buff_addr = mmap(0, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, ctx->drm_fd, mreq.offset);
     if (fb->buff_addr == MAP_FAILED) {
-        perror("[ DRM ] mmap NV12 dumb");
+        ERROR("mmap NV12 dumb");
         return -1;
     }
     return 0;
@@ -384,7 +385,7 @@ static int drm_get_prop_id(int fd, uint32_t obj_id, uint32_t obj_type, const cha
     if (!props) return -1;
     for (uint32_t i = 0; i < props->count_props; i++) {
         drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
-        //printf("plane %d property: %s\n", obj_id, p->name);
+        //DEBUG("plane %d property: %s", obj_id, p->name);
         if (p && strcmp(p->name, name) == 0) { prop_id = p->prop_id; drmModeFreeProperty(p); break; }
         if (p) drmModeFreeProperty(p);
     }
@@ -443,7 +444,7 @@ static void drm_fill_plane_props(int drm_fd, uint32_t plane_id, struct drm_plane
 
 static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width, int height, int hor_stride, int ver_stride)
 {
-    printf("[ DRM ] Preparing NV12 framebuffer with DMA-FD %d, size: %dx%d, stride: %dx%d\n",
+    INFO("Preparing NV12 framebuffer with DMA-FD %d, size: %dx%d, stride: %dx%d",
            dma_fd, width, height, hor_stride, ver_stride);
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -454,7 +455,7 @@ static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width,
             .handle = 0,
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) < 0) {
-        perror("[ DRM ] DRM_IOCTL_PRIME_FD_TO_HANDLE");
+        ERROR("DRM_IOCTL_PRIME_FD_TO_HANDLE");
         return -1;
     }
 
@@ -474,15 +475,15 @@ static int drm_prepare_nv12_fb(struct drm_context_t *ctx, int dma_fd, int width,
             .offsets = { 0, uv_offset },
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2");
-        fprintf(stderr, "[ DRM ] Failed to add FB2: fd=%d, handle=%u, pitch=%d, offset=%d\n",
+        ERROR("DRM_IOCTL_MODE_ADDFB2");
+        ERROR("Failed to add FB2: fd=%d, handle=%u, pitch=%d, offset=%d",
                 dma_fd, prime.handle, hor_stride, hor_stride * ver_stride);
         return -1;
     }
 
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
-    printf("[ DRM ] Created framebuffer: fb_id=%u took time: %ld us\n", fb2.fb_id, usec);
+    INFO("Created framebuffer: fb_id=%u took time: %ld us", fb2.fb_id, usec);
     return fb2.fb_id;
 }
 
@@ -494,7 +495,7 @@ static int drm_prepare_argb8888_fb(struct drm_context_t *ctx, int dma_fd, int wi
         .handle = 0,
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) < 0) {
-        perror("[ DRM ] DRM_IOCTL_PRIME_FD_TO_HANDLE (ARGB8888)");
+        ERROR("DRM_IOCTL_PRIME_FD_TO_HANDLE (ARGB8888)");
         return -1;
     }
 
@@ -507,7 +508,7 @@ static int drm_prepare_argb8888_fb(struct drm_context_t *ctx, int dma_fd, int wi
         .offsets = { 0 },
     };
     if (ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2) < 0) {
-        perror("[ DRM ] DRM_IOCTL_MODE_ADDFB2 (ARGB8888)");
+        ERROR("DRM_IOCTL_MODE_ADDFB2 (ARGB8888)");
         return -1;
     }
     return fb2.fb_id;
@@ -517,18 +518,19 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *ov
                                   uint32_t video_fb_id, int dma_fd, int video_width, int video_height)
 {
     if (ctx->argb888_plane_id < 0 && ctx->nv12_plane_id < 0) {
-        fprintf(stderr, "[ DRM ] No planes available for atomic commit!\n");
+        ERROR("No planes available for atomic commit!");
         return -1;
     }
 
 #if DRM_DEBUG
-    printf("[ DRM ] drm_fd=%d Committing video plane %d with FB %d, dma_fd %d size %dx%d, overlay plane %d with FB %d, size %dx%d,\n", ctx->drm_fd, ctx->nv12_plane_id, video_fb_id, dma_fd,
-           video_width, video_height, ctx->argb888_plane_id, overlay_fb->fb_id, overlay_width, overlay_height);
+    DEBUG("drm_fd=%d Committing video plane %d with FB %d, dma_fd %d size %dx%d, overlay plane %d with FB %d, size %dx%d,",
+            ctx->drm_fd, ctx->nv12_plane_id, video_fb_id, dma_fd, video_width, video_height, ctx->argb888_plane_id,
+            overlay_fb->fb_id, overlay_width, overlay_height);
 #endif
 
     drmModeAtomicReq *req = drmModeAtomicAlloc();
     if (!req) {
-        fprintf(stderr, "[ DRM ] Failed to allocate atomic request\n");
+        ERROR("Failed to allocate atomic request");
         return -1;
     }
 
@@ -536,7 +538,7 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *ov
     struct drm_plane_props *overlay_plane_props = &ctx->overlay_plane_props;
 
     if (!ctx || !ctx->connector || !ctx->crtc || !video_plane_props) {
-        fprintf(stderr, "NULL pointer in DRM context!\n");
+        ERROR("NULL pointer in DRM context!");
         drmModeAtomicFree(req);
         return -1;
     }
@@ -632,14 +634,14 @@ int drm_atomic_commit_all_buffers(struct drm_context_t *ctx, struct drm_fb_t *ov
     cleanup.ctx = ctx;
 
     if (drmModeAtomicCommit(ctx->drm_fd, req, DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT, &cleanup) < 0) {
-        fprintf(stderr, "[ DRM ] Atomic commit failed for all planes %s\n", strerror(errno));
+        ERROR("Atomic commit failed for all planes %s", strerror(errno));
         drmModeAtomicFree(req);
         atomic_store(&pending_commit, 1);
         return -1;
     }
 
 #if DRM_DEBUG
-    printf("[ DRM ] Atomic commit completed: video plane %d with FB %d, size %dx%d, overlay plane %d with FB %d, size %dx%d\n",
+    DEBUG("Atomic commit completed: video plane %d with FB %d, size %dx%d, overlay plane %d with FB %d, size %dx%d",
            ctx->nv12_plane_id, video_fb_id, video_width, video_height,
            ctx->argb888_plane_id, overlay_fb->fb_id, overlay_width, overlay_height);
 #endif
@@ -741,7 +743,7 @@ static int alloc_dmabuf_fd(size_t size)
 {
     int heap_fd = open("/dev/dma_heap/system", O_RDWR);
     if (heap_fd < 0) {
-        perror("open /dev/dma_heap/system");
+        ERROR("open /dev/dma_heap/system");
         return -1;
     }
 
@@ -752,7 +754,7 @@ static int alloc_dmabuf_fd(size_t size)
     };
 
     if (ioctl(heap_fd, DMA_HEAP_IOCTL_ALLOC, &alloc) < 0) {
-        perror("DMA_HEAP_IOCTL_ALLOC");
+        ERROR("DMA_HEAP_IOCTL_ALLOC");
         close(heap_fd);
         return -1;
     }
@@ -769,7 +771,7 @@ static int alloc_nv12_dmabuf_from_ram(void *nv12_ptr, int width, int height)
 
     heap_fd = open("/dev/dma_heap/system", O_RDWR);
     if (heap_fd < 0) {
-        perror("open /dev/dma_heap/system");
+        ERROR("open /dev/dma_heap/system");
         return -1;
     }
 
@@ -779,7 +781,7 @@ static int alloc_nv12_dmabuf_from_ram(void *nv12_ptr, int width, int height)
             .heap_flags = 0,
     };
     if (ioctl(heap_fd, DMA_HEAP_IOCTL_ALLOC, &alloc) < 0) {
-        perror("DMA_HEAP_IOCTL_ALLOC");
+        ERROR("DMA_HEAP_IOCTL_ALLOC");
         close(heap_fd);
         return -1;
     }
@@ -789,7 +791,7 @@ static int alloc_nv12_dmabuf_from_ram(void *nv12_ptr, int width, int height)
 
     dst = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fd, 0);
     if (dst == MAP_FAILED) {
-        perror("mmap dma-buf");
+        ERROR("mmap dma-buf");
         close(dma_fd);
         return -1;
     }
@@ -844,7 +846,7 @@ static int find_rotation_in_dt(const char *base)
 static int drm_activate_crtc(struct drm_context_t *ctx)
 {
     if (!ctx || !ctx->connector || !ctx->crtc) {
-        fprintf(stderr, "[ DRM ] Invalid DRM context for activation!\n");
+        ERROR("Invalid DRM context for activation!");
         return -EINVAL;
     }
 
@@ -852,14 +854,14 @@ static int drm_activate_crtc(struct drm_context_t *ctx)
     int mode_id_prop_id = drm_get_prop_id(ctx->drm_fd, ctx->crtc->crtc_id, DRM_MODE_OBJECT_CRTC, "MODE_ID");
     int crtc_id_prop_id = drm_get_prop_id(ctx->drm_fd, ctx->connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID");
     if (active_prop_id < 0 || mode_id_prop_id < 0 || crtc_id_prop_id < 0) {
-        fprintf(stderr, "[ DRM ] Cannot find CRTC/connector properties for activation!\n");
+        ERROR("Cannot find CRTC/connector properties for activation!");
         return -1;
     }
 
     // Check current ACTIVE value
     int64_t active = drm_get_prop_value(ctx->drm_fd, ctx->crtc->crtc_id, DRM_MODE_OBJECT_CRTC, "ACTIVE");
     if (active == 1) {
-        printf("[ DRM ] CRTC already active, no activation needed.\n");
+        DEBUG("CRTC already active, no activation needed.");
         return 0;
     }
 
@@ -867,13 +869,13 @@ static int drm_activate_crtc(struct drm_context_t *ctx)
     uint32_t mode_blob_id = 0;
     int ret = drmModeCreatePropertyBlob(ctx->drm_fd, &ctx->connector->modes[0], sizeof(drmModeModeInfo), &mode_blob_id);
     if (ret != 0) {
-        fprintf(stderr, "[ DRM ] Failed to create MODE_ID blob for activation!\n");
+        ERROR("Failed to create MODE_ID blob for activation!");
         return -1;
     }
 
     drmModeAtomicReq *req = drmModeAtomicAlloc();
     if (!req) {
-        fprintf(stderr, "[ DRM ] drmModeAtomicAlloc failed!\n");
+        ERROR("drmModeAtomicAlloc failed!");
         drmModeDestroyPropertyBlob(ctx->drm_fd, mode_blob_id);
         return -1;
     }
@@ -884,9 +886,9 @@ static int drm_activate_crtc(struct drm_context_t *ctx)
 
     ret = drmModeAtomicCommit(ctx->drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
     if (ret < 0) {
-        fprintf(stderr, "[ DRM ] Atomic commit for CRTC activation failed: %s\n", strerror(errno));
+        ERROR("Atomic commit for CRTC activation failed: %s", strerror(errno));
     } else {
-        printf("[ DRM ] Successfully activated CRTC and connector.\n");
+        DEBUG("Successfully activated CRTC and connector.");
     }
 
     drmModeAtomicFree(req);
@@ -962,7 +964,7 @@ void drm_disable_unused_planes(int drm_fd, uint32_t crtc_id, uint32_t plane_vide
 
             int ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
             if (ret) {
-                fprintf(stderr, "[ DRM ] Could not disable plane %u: %s\n", plane_id, strerror(errno));
+                ERROR("Could not disable plane %u: %s", plane_id, strerror(errno));
             }
         }
 
@@ -979,46 +981,46 @@ int drm_init(char *device, struct config_t *cfg)
     uint64_t cap;
 
     if (!device || strlen(device) == 0 || !cfg) {
-        fprintf(stderr, "[ DRM ] No device specified\n");
+        ERROR("No device specified");
         return -EINVAL;
     }
 
     drm_context.drm_fd = open(device, O_RDWR | O_CLOEXEC);
     if (drm_context.drm_fd < 0) {
-        fprintf(stderr, "[ DRM ] Failed to open DRM device %s: %s\n", device, strerror(errno));
+        ERROR("Failed to open DRM device %s: %s", device, strerror(errno));
         return -errno;
     }
-    printf("[ DRM ] Opened DRM device %s successfully, fb_id %d\n", device, drm_context.drm_fd);
+    INFO("Opened DRM device %s successfully, fb_id %d", device, drm_context.drm_fd);
 
     ret = drmSetClientCap(drm_context.drm_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
     if (ret) {
-        fprintf(stderr, "[ DRM ] Failed to set universal planes capability: %s\n", strerror(errno));
+        ERROR("Failed to set universal planes capability: %s", strerror(errno));
         close(drm_context.drm_fd);
         return -errno;
     }
 
-    printf("[ DRM ] Set universal planes capability successfully\n");
+    INFO("Set universal planes capability successfully");
 
     ret = drmSetClientCap(drm_context.drm_fd, DRM_CLIENT_CAP_ATOMIC, 1);
     if (ret) {
-        fprintf(stderr, "failed to set atomic cap, %d", ret);
+        ERROR("Failed to set atomic cap: %d", ret);
         return ret;
     }
-    printf("[ DRM ] Set atomic capability successfully\n");
+    INFO("Set atomic capability successfully");
 
     if (drmGetCap(drm_context.drm_fd, DRM_CAP_DUMB_BUFFER, &cap) < 0 || !cap) {
-        fprintf(stderr, "drm device '%s' does not support dumb buffers\n", device);
+        ERROR("drm device '%s' does not support dumb buffers", device);
         close(drm_context.drm_fd);
         return -EOPNOTSUPP;
     }
-    printf("[ DRM ] Device supports dumb buffers\n");
+    INFO("Device supports dumb buffers");
 
     if (drmGetCap(drm_context.drm_fd, DRM_CAP_CRTC_IN_VBLANK_EVENT, &cap) < 0 || !cap) {
-        fprintf(stderr, "drm device '%s' does not support atomic KMS\n", device);
+        ERROR("drm device '%s' does not support atomic KMS", device);
         close(drm_context.drm_fd);
         return -EOPNOTSUPP;
     }
-    printf("[ DRM ] Device supports atomic KMS\n");
+    INFO("Device supports atomic KMS");
 
     // For debug, print all available modes
     drm_print_modes(&drm_context);
@@ -1029,13 +1031,13 @@ int drm_init(char *device, struct config_t *cfg)
 
 
     if (!drm_context.crtc) {
-        fprintf(stderr, "[ DRM ] CRTC is not available, aborting further DRM setup!\n");
+        ERROR("CRTC is not available, aborting further DRM setup!");
         return -1;
     }
 
     drm_context.nv12_plane_id = drm_find_plane(&drm_context, DRM_FORMAT_NV12);
     if (drm_context.nv12_plane_id < 0) {
-        fprintf(stderr, "[ DRM ] Failed to find suitable plane for format NV12\n");
+        ERROR("Failed to find suitable plane for format NV12");
         return -1;
     }
 
@@ -1045,7 +1047,7 @@ int drm_init(char *device, struct config_t *cfg)
 
     drm_context.argb888_plane_id = drm_find_plane(&drm_context, DRM_FORMAT_ARGB8888);
     if (drm_context.argb888_plane_id < 0) {
-        fprintf(stderr, "[ DRM ] Failed to find suitable plane for format ARGB8888\n");
+        ERROR("Failed to find suitable plane for format ARGB8888");
         return -1;
     }
 
@@ -1053,23 +1055,23 @@ int drm_init(char *device, struct config_t *cfg)
     drm_fill_plane_props(drm_context.drm_fd, drm_context.argb888_plane_id, &drm_context.overlay_plane_props,
                          drm_context.connector->connector_id, drm_context.crtc->crtc_id, &drm_context.connector->modes[0]);
 
-    printf("[ DRM ] Found NV12 plane ID: %d for video, ARGB8888 plane ID: %d for OVERLAY\n", drm_context.nv12_plane_id, drm_context.argb888_plane_id);
+    INFO("Found NV12 plane ID: %d for video, ARGB8888 plane ID: %d for OVERLAY", drm_context.nv12_plane_id, drm_context.argb888_plane_id);
 
     drm_disable_unused_planes(drm_context.drm_fd, drm_context.crtc->crtc_id, drm_context.nv12_plane_id, drm_context.argb888_plane_id);
 
     drm_context.rotate = find_rotation_in_dt("/proc/device-tree");
     if (drm_context.rotate == -1) {
-        printf("[ DRM ] Rotation not found in device-tree, fallback to 0\n");
+        INFO("Rotation not found in device-tree, fallback to 0");
         drm_context.rotate = 0;
     }
-    printf("[ DRM ] Detected rotation: %d degrees\n", drm_context.rotate);
+    INFO("Detected rotation: %d degrees", drm_context.rotate);
     //drm_context.rotate = 0; // Force set no rotation for testing
 
     drm_create_overlay_buff_pool(&drm_context);
 
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
-        printf("[ DRM ] Already running thread\n");
+        ERROR("Already running thread");
         return -1;
     }
     ret = pthread_create(&drm_thread, NULL, compositor_thread, &drm_context);
@@ -1086,32 +1088,32 @@ static int test_draw_all_plane(struct drm_context_t *ctx)
 
     drm_create_dumb_argb8888_fb(ctx, width, height, &overlay_frame_buffer);
     if (overlay_frame_buffer.buff_addr == MAP_FAILED) {
-        fprintf(stderr, "[ DRM ] Failed to create ARGB8888 framebuffer: %s\n", strerror(errno));
+        ERROR("Failed to create ARGB8888 framebuffer: %s", strerror(errno));
         return -1;
     }
-    printf("[ DRM TEST ] Created OVERLAY framebuffer: fb_id=%u, size=%zu\n", overlay_frame_buffer.fb_id, overlay_frame_buffer.size);
+    INFO("Created OVERLAY framebuffer: fb_id=%u, size=%zu", overlay_frame_buffer.fb_id, overlay_frame_buffer.size);
 
     // Fill the OVERLAY framebuffer with a rainbow pattern
     fill_rainbow_argb8888(&overlay_frame_buffer, width, height);
 
     void *src_nv12 = malloc(width * height * 3 / 2);
     if (src_nv12 == NULL) {
-        fprintf(stderr, "[ DRM ] Failed to allocate memory for NV12 buffer\n");
+        ERROR("Failed to allocate memory for NV12 buffer");
         return -1;
     }
 
     fill_rainbow_checker_nv12(src_nv12, width, height);
-    printf("[ DRM TEST ] Filled NV12 buffer with rainbow checker pattern\n");
+    INFO("Filled NV12 buffer with rainbow checker pattern");
 
     int nv12_dmabuf_fd = alloc_nv12_dmabuf_from_ram(src_nv12, width, height);
     if (nv12_dmabuf_fd < 0) {
-        fprintf(stderr, "[ DRM ] Failed to allocate NV12 dmabuf from RAM\n");
+        ERROR("Failed to allocate NV12 dmabuf from RAM");
         free(src_nv12);
         return -1;
     }
     free(src_nv12);
 
-    printf("[ DRM TEST ] Allocated NV12 dmabuf fd: %d\n", nv12_dmabuf_fd);
+    INFO("Allocated NV12 dmabuf fd: %d", nv12_dmabuf_fd);
 
     struct drm_prime_handle prime = {
         .fd = nv12_dmabuf_fd,
@@ -1130,19 +1132,19 @@ static int test_draw_all_plane(struct drm_context_t *ctx)
     };
     ret = ioctl(ctx->drm_fd, DRM_IOCTL_MODE_ADDFB2, &fb2);
     if (ret < 0) {
-        perror("DRM_IOCTL_MODE_ADDFB2");
-        printf("  handle0=%u handle1=%u pitch0=%u pitch1=%u\n",
+        ERROR("DRM_IOCTL_MODE_ADDFB2");
+        INFO("  handle0=%u handle1=%u pitch0=%u pitch1=%u",
                prime.handle, prime.handle, width, width);
-        printf("  fd=%d\n", nv12_dmabuf_fd);
+        INFO("  fd=%d", nv12_dmabuf_fd);
         close(nv12_dmabuf_fd);
     }
-    printf("[ DRM TEST ] Created framebuffer: fb_id=%u\n", fb2.fb_id);
+    INFO("Created framebuffer: fb_id=%u", fb2.fb_id);
 
 
     ret = drm_atomic_commit_all_buffers(ctx, &overlay_frame_buffer, width, height, fb2.fb_id, 0,
                                         width, height);
     if (ret < 0) {
-        fprintf(stderr, "[ DRM ] Failed to commit video framebuffer: %s\n", strerror(errno));
+        ERROR("[ DRM ] Failed to commit video framebuffer: %s", strerror(errno));
     }
 
     return ret;
@@ -1160,7 +1162,7 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
 
     if (prev_sec != 0) {
         double dt = (double)(sec - prev_sec) * 1000.0 + (double)(usec - prev_usec) / 1000.0;
-        printf("[ DRM ] Done! Frame flip! Δt=%.2f ms (%.2f FPS)\n", dt, 1000.0 / dt);
+        DEBG("Done! Frame flip! Δt=%.2f ms (%.2f FPS)", dt, 1000.0 / dt);
     }
     prev_sec = sec;
     prev_usec = usec;
@@ -1193,7 +1195,7 @@ static void drm_init_event_context(void)
 static int drm_create_overlay_buff_pool(struct drm_context_t *ctx)
 {
     if (!ctx || ctx->drm_fd < 0) {
-        fprintf(stderr, "[ DRM ] Invalid DRM context\n");
+        ERROR("Invalid DRM context");
         return -EINVAL;
     }
 
@@ -1209,7 +1211,7 @@ static int drm_create_overlay_buff_pool(struct drm_context_t *ctx)
     for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
         ret = drm_create_dumb_argb8888_fb(ctx, width, height, &overlay_bufs[i]);
         if (ret < 0) {
-            fprintf(stderr, "OVERLAY dumb fb init failed for slot %d\n", i);
+            ERROR("OVERLAY dumb fb init failed for slot %d", i);
         }
         overlay_db.dirty[i] = 0;
     }
@@ -1218,25 +1220,25 @@ static int drm_create_overlay_buff_pool(struct drm_context_t *ctx)
     overlay_db.cur = 0;
     overlay_db.next = 1;
 
-    printf("[ DRM ] OVERLAY buffer pool created successfully\n");
+    INFO("OVERLAY buffer pool created successfully");
     return ret;
 
 }
 
 static void rotate_video_pool_cleanup(struct drm_context_t *ctx)
 {
-    printf("[ DRM ] Cleaning up video rotate pool\n");
+    INFO("Cleaning up video rotate pool");
     for (int i = 0; i < ROTATE_BUF_COUNT; ++i) {
         if (rotate_video_pool.fb_id[i] > 0) {
             if (ctx && ctx->drm_fd > 0) {
                 drmModeRmFB(ctx->drm_fd, rotate_video_pool.fb_id[i]);
-                printf("[ DRM ] Removed video rotate pool FB %d\n", rotate_video_pool.fb_id[i]);
+                INFO("Removed video rotate pool FB %d", rotate_video_pool.fb_id[i]);
             }
             rotate_video_pool.fb_id[i] = 0;
         }
         if (rotate_video_pool.dma_fd[i] > 0) {
             close(rotate_video_pool.dma_fd[i]);
-            printf("[ DRM ] Closed video rotate pool DMA FD %d\n", rotate_video_pool.dma_fd[i]);
+            INFO("Closed video rotate pool DMA FD %d", rotate_video_pool.dma_fd[i]);
             rotate_video_pool.dma_fd[i] = 0;
         }
     }
@@ -1247,7 +1249,7 @@ static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int hei
 {
     if (rotate_video_pool.w == width || rotate_video_pool.h == height) return;
 
-    printf("[ DRM ] Initializing video rotate pool, size: %dx%d, stride: %dx%d\n", width, height, hor_stride, ver_stride);
+    INFO("Initializing video rotate pool, size: %dx%d, stride: %dx%d", width, height, hor_stride, ver_stride);
 
     rotate_video_pool.w = width;
     rotate_video_pool.h = height;
@@ -1270,16 +1272,16 @@ static void rotate_video_pool_init(struct drm_context_t *ctx, int width, int hei
 
 static void video_buf_map_cleanup(struct drm_context_t *ctx)
 {
-    printf("[ DRM ] Cleaning up video buffer map\n");
+    INFO("Cleaning up video buffer map");
     for (int i = 0; i < MAX_VIDEO_BUFS; ++i) {
         if (video_buf_map.fb_id[i] > 0 && ctx->drm_fd > 0) {
             drmModeRmFB(ctx->drm_fd, video_buf_map.fb_id[i]);
-            printf("[ DRM ] Removed video buffer FB %d\n", video_buf_map.fb_id[i]);
+            INFO("Removed video buffer FB %d", video_buf_map.fb_id[i]);
             video_buf_map.fb_id[i] = 0;
         }
         if (video_buf_map.dma_fd[i] > 0) {
             close(video_buf_map.dma_fd[i]);
-            printf("[ DRM ] Closed video buffer DMA FD %d\n", video_buf_map.dma_fd[i]);
+            INFO("Closed video buffer DMA FD %d", video_buf_map.dma_fd[i]);
             video_buf_map.dma_fd[i] = -1;
         }
         video_buf_map.dirty[i] = 0;
@@ -1290,16 +1292,16 @@ static void video_buf_map_cleanup(struct drm_context_t *ctx)
 
 static void drm_cleanup_overlay_buff_pool(struct drm_context_t *ctx)
 {
-    printf("[ DRM ] Cleaning up OVERLAY buffer pool\n");
+    INFO("Cleaning up OVERLAY buffer pool");
     for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
         if (overlay_bufs[i].fb_id > 0 && ctx->drm_fd > 0) {
             drmModeRmFB(ctx->drm_fd, overlay_bufs[i].fb_id);
-            printf("[ DRM ] Removed OVERLAY buffer FB %d\n", overlay_bufs[i].fb_id);
+            INFO("Removed OVERLAY buffer FB %d", overlay_bufs[i].fb_id);
             overlay_bufs[i].fb_id = 0;
         }
         if (overlay_bufs[i].buff_addr && overlay_bufs[i].buff_addr != MAP_FAILED) {
             munmap(overlay_bufs[i].buff_addr, overlay_bufs[i].size);
-            printf("[ DRM ] Unmapped OVERLAY buffer %d\n", i);
+            INFO("Unmapped OVERLAY buffer %d", i);
             overlay_bufs[i].buff_addr = NULL;
         }
         overlay_bufs[i].handles[0] = 0;
@@ -1319,7 +1321,7 @@ int drm_get_overlay_frame_size(int *width, int *height, int *rotate)
     if (height) *height = overlay_db.overlay_height;
     if (rotate) *rotate = drm_context.rotate;
     if (overlay_db.overlay_width <= 0 || overlay_db.overlay_height <= 0) {
-        fprintf(stderr, "[ DRM ] OVERLAY frame size is not initialized!\n");
+        ERROR("[ DRM ] OVERLAY frame size is not initialized!");
         return -1;
     }
     return 0;
@@ -1335,7 +1337,7 @@ void *drm_get_next_overlay_fb(void)
     if (overlay_db.dirty[overlay_db.next] == 0 && overlay_bufs[overlay_db.next].buff_addr) {
         return overlay_bufs[overlay_db.next].buff_addr;
     }
-    fprintf(stderr, "[ DRM ] OVERLAY buffer %d is dirty or not available\n", overlay_db.next);
+    ERROR("OVERLAY buffer %d is dirty or not available", overlay_db.next);
     // force dirty to ensure next frame
     overlay_db.cur ^= 1;
     overlay_db.next ^= 1;
@@ -1355,13 +1357,13 @@ static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int heig
 
     int idx = rotate_video_pool.count;
     rotate_video_pool.count = (rotate_video_pool.count + 1) % ROTATE_BUF_COUNT;
-    //printf("[ DRM ] Using rotate pool buffer %d for rotation, size %dx%d (stride %dx%d)\n", idx, width, height, hor_stride, ver_stride);
+    //DEBUG("Using rotate pool buffer %d for rotation, size %dx%d (stride %dx%d)", idx, width, height, hor_stride, ver_stride);
     return rotate_video_pool.dma_fd[idx];
 }
 
 void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride, int ver_stride)
 {
-    //printf("[ DRM ] New Video Frame, DMA FD: %d, size: %dx%d (stride %dx%d)\n", dma_fd, width, height, hor_stride, ver_stride);
+    //DEBUG("New Video Frame, DMA FD: %d, size: %dx%d (stride %dx%d)", dma_fd, width, height, hor_stride, ver_stride);
     struct drm_context_t *ctx = drm_get_ctx();
     int need_rotate = (ctx->rotate == 90 || ctx->rotate == 270 || ctx->rotate == 180);
     int out_width = width, out_height = height;
@@ -1376,7 +1378,7 @@ void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride,
         out_ver_stride = hor_stride;
         current_dma_fd = get_next_rotate_dma_fd(ctx, out_width, out_height, out_hor_stride, out_ver_stride);
         if (current_dma_fd < 0) {
-            fprintf(stderr, "[ DRM ] All rotate buffers busy, dropping frame!\n");
+            WARN("All rotate buffers busy, dropping frame!");
             return;
         }
         int rotate = 0;
@@ -1393,7 +1395,7 @@ void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride,
         // Rotate the current_dma_fd using RGA
         int rga_ret = rga_nv12_rotate(dma_fd, current_dma_fd, width, height, hor_stride, ver_stride, rotate);
         if (rga_ret != 0) {
-            fprintf(stderr, "[ DRM ] RGA rotation failed\n");
+            ERROR("RGA rotation failed");
             rotate_video_pool_cleanup(ctx);
             rotate_video_pool_init(ctx, width, height, hor_stride, ver_stride);
             return;
@@ -1417,11 +1419,11 @@ void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride,
 
             if (video_buf_map.fb_id[to_cleanup] > 0) {
                 drmModeRmFB(ctx->drm_fd, video_buf_map.fb_id[to_cleanup]);
-                printf("[ DRM ] Cleaned up old video FB %d\n", video_buf_map.fb_id[to_cleanup]);
+                INFO("Cleaned up old video FB %d", video_buf_map.fb_id[to_cleanup]);
             }
             if (video_buf_map.dma_fd[to_cleanup] > 0) {
                 close(video_buf_map.dma_fd[to_cleanup]);
-                printf("[ DRM ] Closed old DMA FD %d\n", video_buf_map.dma_fd[to_cleanup]);
+                INFO("Closed old DMA FD %d", video_buf_map.dma_fd[to_cleanup]);
             }
 
             idx = to_cleanup;
@@ -1431,10 +1433,10 @@ void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride,
 
         int current_fb_id = drm_prepare_nv12_fb(ctx, current_dma_fd, out_width, out_height, out_hor_stride, out_ver_stride);
         if (current_fb_id < 0) {
-            printf("[ DRM ] Failed to register new NV12 FB\n");
+            ERROR("Failed to register new NV12 FB");
             return;
         }
-        printf("[ DRM ] Registered new NV12 video buffer with fd %d\n", current_dma_fd);
+        INFO("Registered new NV12 video buffer with fd %d", current_dma_fd);
         video_buf_map.video_height = out_height;
         video_buf_map.video_width = out_width;
         video_buf_map.dma_fd[idx] = current_dma_fd;
@@ -1446,9 +1448,10 @@ void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride,
 
     if (idx >= 0) {
         video_buf_map.cur = idx;
+
 #if DRM_DEBUG
-        printf("[ DRM ] Pushed new video frame to buffer %d (DMA FD: %d, FB ID: %u)\n",
-               idx, video_buf_map.dma_fd[idx], video_buf_map.fb_id[idx]);
+    DEBUG("Pushed new video frame to buffer %d (DMA FD: %d, FB ID: %u)",
+            idx, video_buf_map.dma_fd[idx], video_buf_map.fb_id[idx]);
 #endif
     }
     struct dma_buf_sync sync = {0};
@@ -1503,10 +1506,10 @@ static void* compositor_thread(void* arg)
     struct drm_context_t *ctx = (struct drm_context_t *)arg;
 
     if (!ctx || ctx->drm_fd < 0) {
-        fprintf(stderr, "[ DRM ] Invalid DRM context in compositor thread\n");
+        ERROR("Invalid DRM context in compositor thread");
         return NULL;
     } else {
-        printf("[ DRM ] Compositor thread started with DRM fd %d\n", ctx->drm_fd);
+        INFO("Compositor thread started with DRM fd %d", ctx->drm_fd);
     }
 
     for (int i = 0; i < OVERLAY_BUF_COUNT; ++i) {
@@ -1559,14 +1562,14 @@ static void* compositor_thread(void* arg)
         usleep(5000); // Sleep for 5 ms to avoid busy-waiting new events
     }
 
-    printf("[ DRM ] Compositor thread exiting\n");
+    INFO("Compositor thread exiting");
     return NULL;
 }
 
 struct drm_context_t *drm_get_ctx(void)
 {
     if (drm_context.drm_fd < 0) {
-        fprintf(stderr, "[ DRM ] DRM context not initialized\n");
+        ERROR("DRM context not initialized");
         return NULL;
     }
     return &drm_context;
@@ -1593,7 +1596,7 @@ static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_he
     rga_buffer_handle_t dst_handle = importbuffer_fd(dst_fd, &dst_param);
 
     if (src_handle == 0 || dst_handle == 0) {
-        fprintf(stderr, "[RGA] importbuffer_fd failed\n");
+        ERROR("importbuffer_fd failed");
         if (src_handle) releasebuffer_handle(src_handle);
         if (dst_handle) releasebuffer_handle(dst_handle);
         return -1;
@@ -1610,7 +1613,7 @@ static int rga_argb8888_rotate(int src_fd, int dst_fd, int src_width, int src_he
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
     double ms = usec / 1000.0;
-    printf("[ RGA ] Rotation completed %.3f ms\n", ms);
+    DEBUG("Rotation completed %.3f ms", ms);
 #endif
     return 0;
 }
@@ -1638,7 +1641,7 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
     rga_buffer_handle_t dst_handle = importbuffer_fd(dst_fd, &dst_param);
 
     if (src_handle == 0 || dst_handle == 0) {
-        fprintf(stderr, "[RGA] importbuffer_fd failed\n");
+        ERROR("importbuffer_fd failed");
         if (src_handle) releasebuffer_handle(src_handle);
         if (dst_handle) releasebuffer_handle(dst_handle);
         return -1;
@@ -1650,7 +1653,7 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
     // rotate the image using RGA
     int ret = imrotate(src, dst, rotation);
     if (ret != IM_STATUS_SUCCESS) {
-        printf("Error: imrotate failed: %d\n", ret);
+        ERROR("imrotate failed: %d", ret);
         releasebuffer_handle(src_handle);
         releasebuffer_handle(dst_handle);
         return -1;
@@ -1664,7 +1667,7 @@ static int rga_nv12_rotate(int src_fd, int dst_fd, int src_width, int src_height
     clock_gettime(CLOCK_MONOTONIC, &t2);
     long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
     double ms = usec / 1000.0;
-    printf("[ RGA ] Rotation completed %.3f ms\n", ms);
+    DEBUG("Rotation completed %.3f ms", ms);
 #endif
     return 0;
 }
@@ -1673,21 +1676,21 @@ void drm_close(void)
 {
     //pthread_mutex_destroy(&drm_mutex);
 
-    printf("[ DRM ] Close...\n");
+    INFO("Close...");
     if (!atomic_load(&running)) {
-        printf("[ DRM ] Not running, nothing to stop\n");
+        INFO("Not running, nothing to stop");
     } else {
         atomic_store(&running, 0);
         pthread_join(drm_thread, NULL);
-        printf("[ DRM ] Stopped compositor thread\n");
+        INFO("Stopped compositor thread");
     }
 
     if (drm_context.drm_fd > 0) {
         close(drm_context.drm_fd);
         drm_context.drm_fd = -1;
-        printf("[ DRM ] Closed DRM device\n");
+        INFO("Closed DRM device");
     } else {
-        fprintf(stderr, "[ DRM ] DRM device not initialized or already closed\n");
+        ERROR("DRM device not initialized or already closed");
     }
 
     rotate_video_pool_cleanup(&drm_context);

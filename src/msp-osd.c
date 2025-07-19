@@ -46,8 +46,11 @@
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
 #include "ui_interface/compositor.h"
+#include "log.h"
 
 #define DEBUG_PRINT_LINK 0
+
+static const char *module_name_str = "MSP_OSD";
 
 static pthread_t msp_thread;
 static atomic_int running = 0;
@@ -519,7 +522,7 @@ void osd_wfb_status_link_callback(const wfb_rx_status *st)
 
 #if DEBUG_PRINT_LINK
     for (int i = 0; i < st->ants_count; ++i) {
-        printf("[MSP OSD] WFB status link ant[%d]: freq=%lld mcs=%lld bw=%lld ant_id=%lld pkt_delta=%lld bitrate=%.1f rssi=[%lld/%lld/%lld] snr=[%lld/%lld/%lld]\n",
+        DEBUG("WFB status link ant[%d]: freq=%lld mcs=%lld bw=%lld ant_id=%lld pkt_delta=%lld bitrate=%.1f rssi=[%lld/%lld/%lld] snr=[%lld/%lld/%lld]",
                i,
                st->ants[i].freq, st->ants[i].mcs, st->ants[i].bw, st->ants[i].ant_id,
                st->ants[i].pkt_delta,
@@ -548,18 +551,18 @@ static void render_display(void)
 static void* msp_osd_thread(void *arg)
 {
     struct config_t *cfg = (struct config_t *)arg;
-    printf("[ MSP OSD ] Starting MSP OSD thread\n");
+    INFO("Starting MSP OSD thread");
 
     if (drm_get_overlay_frame_size(&display_width, &display_height, &rotation) < 0) {
-        printf("[ MSP OSD ] Failed to get OSD frame size\n");
+        ERROR("Failed to get OSD frame size");
         return NULL;
     }
-    printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
+    INFO("OSD frame size: %dx%d, rotation: %d", display_width, display_height, rotation);
 
     // Initialize OSD buffer for compositor (32-bit ARGB)
     osd_compositor_buffer = calloc(display_width * display_height, sizeof(uint32_t));
     if (osd_compositor_buffer == NULL) {
-        printf("[ MSP OSD ] Failed to allocate OSD compositor buffer\n");
+        ERROR("Failed to allocate OSD compositor buffer");
         return NULL;
     }
 
@@ -617,7 +620,7 @@ static void* msp_osd_thread(void *arg)
 
     close_all_fonts();
 
-    printf("[ MSP OSD ] Stopped MSP OSD thread\n");
+    INFO("Stopped MSP OSD thread");
 
     return NULL;
 }
@@ -626,7 +629,7 @@ int msp_osd_init(struct config_t *cfg)
 {
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
-        printf("[ MSP OSD ] Already running thread\n");
+        INFO("Already running thread");
         return -1;
     }
     return pthread_create(&msp_thread, NULL, msp_osd_thread, cfg);
@@ -636,7 +639,7 @@ int msp_osd_init(struct config_t *cfg)
 void msp_osd_stop(void)
 {
     if (!atomic_load(&running)) {
-        printf("[ MSP OSD ] Not running, nothing to stop\n");
+        INFO("Not running, nothing to stop");
         return;
     }
     atomic_store(&running, 0);

@@ -37,7 +37,9 @@
 #include <sys/socket.h>
 #include <msgpack.h>
 #include <sys/poll.h>
+#include "log.h"
 
+static const char *module_name_str = "WFB_STATUS_LINK";
 #define DEBUG_MSG 0
 
 static pthread_t rx_thread;
@@ -97,9 +99,7 @@ static int process_rx(const msgpack_object *packet)
     }
 
 #if DEBUG_MSG
-    printf("[RX] id=%s, %u packet fields, %u antennas\n",
-           id, packets.type == MSGPACK_OBJECT_MAP ? packets.via.map.size : 0,
-           rx_ant_stats.type == MSGPACK_OBJECT_MAP ? rx_ant_stats.via.map.size : 0);
+    DEBUG("[RX] id=%s, %u packet fields, %u antennas", id, packets.type == MSGPACK_OBJECT_MAP ? packets.via.map.size : 0, rx_ant_stats.type == MSGPACK_OBJECT_MAP ? rx_ant_stats.via.map.size : 0);
 #endif
 
     // Packets
@@ -125,11 +125,11 @@ static int process_rx(const msgpack_object *packet)
                 if (klen < sizeof(status.packets[status.packets_count].key)) {
                     memcpy(status.packets[status.packets_count].key, key, klen);
                 } else {
-                    fprintf(stderr, "[ WFB STATUS LINK ] Packet key too long: %s\n", key);
+                    ERROR("[ WFB STATUS LINK ] Packet key too long: %s", key);
                 }
                 status.packets_count++;
 #if DEBUG_MSG
-                printf("  packets[%s]: delta=%lld total=%lld\n", key, (long long)delta, (long long)total);
+                DEBUG("  packets[%s]: delta=%lld total=%lld", key, (long long)delta, (long long)total);
 #endif
             }
         }
@@ -151,7 +151,7 @@ static int process_rx(const msgpack_object *packet)
                 int64_t bw   = akv->key.via.array.ptr[0].via.array.ptr[2].via.i64;
                 int64_t ant_id = akv->key.via.array.ptr[1].via.i64;
                 if (ant_id < 0) {
-                    fprintf(stderr, "[ WFB STATUS LINK ] Invalid antenna ID %lld\n", (long long)ant_id);
+                    ERROR("[ WFB STATUS LINK ] Invalid antenna ID %lld", (long long)ant_id);
                     continue;
                 }
 
@@ -181,13 +181,11 @@ static int process_rx(const msgpack_object *packet)
                     double bitrate = ((double)packets_delta * 8.0f) / (1024.0f);
                     status.ants[status.ants_count].bitrate_mbps = (float)bitrate;
 #if DEBUG_MSG
-                    printf("[ WFB STATUS LINK ] [ RX ] ANT[%lld] name='%s' freq=%lld mcs=%lld bw=%lld pkt/s=%d bitrate=%f rssi=[min=%d/avg=%d/max=%d] snr=[min=%d/avg=%d/max=%d]\n", (long long)ant_id, id,
-                           (long long)freq, (long long)mcs, (long long)bw,
-                           packets_delta, bitrate, rssi_min, rssi_avg, rssi_max, snr_min, snr_avg, snr_max);
+                    DEBUG("[ WFB STATUS LINK ] [ RX ] ANT[%lld] name='%s' freq=%lld mcs=%lld bw=%lld pkt/s=%d bitrate=%f rssi=[min=%d/avg=%d/max=%d] snr=[min=%d/avg=%d/max=%d]", (long long)ant_id, id, (long long)freq, (long long)mcs, (long long)bw, packets_delta, bitrate, rssi_min, rssi_avg, rssi_max, snr_min, snr_avg, snr_max);
 #endif
                     status.ants_count++;
                     if (status.ants_count >= MAX_RX_ANT_STATS) {
-                        fprintf(stderr, "[ WFB STATUS LINK ] Too many antennas, max %d\n", MAX_RX_ANT_STATS);
+                        ERROR("[ WFB STATUS LINK ] Too many antennas, max %d", MAX_RX_ANT_STATS);
                         break; // Prevent overflow
                     }
                 }
@@ -232,7 +230,7 @@ static void process_tx(const msgpack_object *root)
     }
 
 #if DEBUG_MSG
-    printf("[ TX ] id=%s, %d packet fields :\n", id, packets.type == MSGPACK_OBJECT_MAP ? (int)packets.via.map.size : 0);
+    DEBUG("[ TX ] id=%s, %d packet fields :", id, packets.type == MSGPACK_OBJECT_MAP ? (int)packets.via.map.size : 0);
 #endif
 
     if (packets.type == MSGPACK_OBJECT_MAP) {
@@ -248,7 +246,7 @@ static void process_tx(const msgpack_object *root)
                 int64_t delta = kv->val.via.array.ptr[0].via.i64;
                 int64_t total = kv->val.via.array.ptr[1].via.i64;
 #if DEBUG_MSG
-                printf("  packets[%s]: delta=%lld total=%lld \n", key, (long long)delta, (long long)total);
+                DEBUG("  packets[%s]: delta=%lld total=%lld", key, (long long)delta, (long long)total);
 #endif
 
             }
@@ -256,7 +254,7 @@ static void process_tx(const msgpack_object *root)
     }
 
 #if DEBUG_MSG
-    printf("  rf_temperature:");
+    DEBUG("  rf_temperature:");
 #endif
 
     if (rf_temperature.type == MSGPACK_OBJECT_MAP) {
@@ -268,13 +266,13 @@ static void process_tx(const msgpack_object *root)
             if (kv->val.type == MSGPACK_OBJECT_POSITIVE_INTEGER || kv->val.type == MSGPACK_OBJECT_NEGATIVE_INTEGER)
                 temperature = kv->val.via.i64;
 #if DEBUG_MSG
-            printf(" [%lld]=%lldC", (long long)antenna_id, (long long)temperature);
+            DEBUG(" [%lld]=%lldC", (long long)antenna_id, (long long)temperature);
 #endif
 
         }
     }
 #if DEBUG_MSG
-    printf("\n");
+    DEBUG("");
 #endif
 }
 
@@ -313,8 +311,7 @@ static void process_title(const msgpack_object *root)
     }
 
 #if DEBUG_MSG
-    printf("[ WFB STATUS LINK ] [TITLE] cli_title=\"%s\" is_cluster=%d temp_overheat_warning=%u\n",
-           cli_title, is_cluster, temp_overheat_warning);
+    DEBUG("[ WFB STATUS LINK ] [TITLE] cli_title=\"%s\" is_cluster=%d temp_overheat_warning=%u", cli_title, is_cluster, temp_overheat_warning);
 #endif
 }
 
@@ -346,7 +343,7 @@ static int process_packet(const msgpack_object* packet)
     } else if (strcmp(type, "cli_title") == 0) {
         process_title(packet);
     } else {
-        fprintf(stderr, "Unknown wfbcli packet type '%s'\n", type);
+        ERROR("Unknown wfbcli packet type '%s'", type);
         return -1;
     }
     return 0;
@@ -357,7 +354,7 @@ static void* rx_thread_fn(void *arg)
     (void)arg;
     while (rx_thread_running) {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) { perror("[ WFB STATUS LINK ] socket"); sleep(1); continue; }
+        if (sock < 0) { PERROR("socket: %s", strerror(errno)); sleep(1); continue; }
 
         struct sockaddr_in srv = {0};
         srv.sin_family = AF_INET;
@@ -365,19 +362,19 @@ static void* rx_thread_fn(void *arg)
         inet_pton(AF_INET, server_host, &srv.sin_addr);
 
         if (connect(sock, (struct sockaddr*)&srv, sizeof(srv)) < 0) {
-            perror("[ WFB STATUS LINK ] connect");
+            PERROR("connect: %s", strerror(errno));
             close(sock);
             sleep(1);
             continue;
         }
-        printf("[ WFB STATUS LINK ] Connected to %s:%d\n", server_host, server_port);
+        INFO("Connected to %s:%d", server_host, server_port);
 
         struct pollfd pfd = { .fd = sock, .events = POLLIN };
         while (rx_thread_running) {
             int pret = poll(&pfd, 1, 1000);
             if (pret < 0) {
                 if (errno == EINTR) continue;
-                perror("[ WFB STATUS LINK ] poll");
+                PERROR("poll: %s", strerror(errno));
                 break;
             }
             if (pret == 0) continue; // Timeout
@@ -390,7 +387,7 @@ static void* rx_thread_fn(void *arg)
                 if (sz == 0 || sz > 1024*1024) break;
 
                 char *buf = malloc(sz);
-                if (!buf) { perror("malloc"); break; }
+                if (!buf) { PERROR("malloc: %s", strerror(errno)); break; }
                 if (recv_all(sock, buf, sz) != sz) { free(buf); break; }
 
                 msgpack_unpacked result;

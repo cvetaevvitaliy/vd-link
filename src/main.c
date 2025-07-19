@@ -38,18 +38,23 @@
 #include "ui_interface.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
+#include "log.h"
+
+static const char *module_name_str = "MAIN";
+#define MAIN_DEBUG 0
 
 static volatile int running = 1;
 static volatile int cleanup_done = 0;
 
 static void signal_handler(int sig)
 {
-    printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
+    INFO("Caught signal %d, exit ...", sig);
+
     running = 0;
     
     // Prevent multiple cleanup calls
     if (cleanup_done) {
-        printf("[ MAIN ] Force exit\n");
+        ERROR("Force exit");
         exit(1);
     }
     cleanup_done = 1;
@@ -58,8 +63,8 @@ static void signal_handler(int sig)
     rtp_receiver_stop();
     ui_interface_deinit();
     drm_close();
-    
-    printf("[ MAIN ] Cleanup completed, exiting\n");
+
+    INFO("Cleanup completed, exiting");
     exit(0);
 }
 
@@ -117,7 +122,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
         case 'p': {
             int port = atoi(optarg);
             if (port < 1 || port > 65535 || config->wfb_port == port) {
-                fprintf(stderr, "Invalid port number: %s\n", optarg);
+                ERROR("Invalid port number: %s", optarg);
                 exit(EXIT_FAILURE);
             }
             config->port = port;
@@ -125,7 +130,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
         case 'w': {
             int port = atoi(optarg);
             if (port < 1 || port > 65535 || config->port == port) {
-                fprintf(stderr, "Invalid WFB port number: %s\n", optarg);
+                ERROR("Invalid WFB port number: %s", optarg);
                 exit(EXIT_FAILURE);
             }
             config->wfb_port = port;

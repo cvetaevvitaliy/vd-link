@@ -25,6 +25,7 @@
  */
 
 #include "rtp_receiver.h"
+#include "log.h"
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <poll.h>
@@ -43,6 +44,8 @@
 
 static pthread_t rtp_thread;
 static atomic_int running = 0;
+
+const char *module_name_str = "RTP";
 
 static const char* codec_type_name(codec_type_t codec)
 {
@@ -68,7 +71,7 @@ static codec_type_t detect_rtp_codec(const uint8_t* payload, int payload_len)
 
     // H.265
     uint8_t h265_type = (nalu_hdr >> 1) & 0x3F;
-    printf("[ RTP DEMUXER ] NALU header: 0x%02X, H.265 type: %d\n", nalu_hdr, h265_type);
+    INFO_M("RTP DEMUXER", "NALU header: 0x%02X, H.265 type: %d", nalu_hdr, h265_type);
     if ((h265_type >= 0 && h265_type <= 31) || (h265_type >= 32 && h265_type <= 34) || h265_type == 39)
         return CODEC_H265;
     if ((h265_type == 48 || h265_type == 49) && payload_len >= 3) {
@@ -80,7 +83,7 @@ static codec_type_t detect_rtp_codec(const uint8_t* payload, int payload_len)
 
     // H.264
     uint8_t h264_type = nalu_hdr & 0x1F;
-    printf("[ RTP DEMUXER ] NALU header: 0x%02X, H.264 type: %d\n", nalu_hdr, h264_type);
+    INFO_M("RTP DEMUXER", "NALU header: 0x%02X, H.264 type: %d", nalu_hdr, h264_type);
     if ((h264_type >= 1 && h264_type <= 23) || h264_type == 5)
         return CODEC_H264;
     if (h264_type == 28 || h264_type == 29) {
@@ -102,7 +105,7 @@ static int detect_codec_cb(void* param, const void* packet, int bytes, uint32_t 
     codec_type_t codec = detect_rtp_codec(packet, bytes);
     if (codec != CODEC_UNKNOWN) {
         *codec_ptr = codec;
-        printf("[ RTP DEMUXER ] Detected codec: %s\n", codec_type_name(codec));
+        INFO_M("RTP DEMUXER", "Detected codec: %s", codec_type_name(codec));
         return 1; // Stop demuxing after detection
     }
     return 0; // Continue demuxing
@@ -140,7 +143,7 @@ static int main_rtp_cb(void* param, const void* packet, int bytes, uint32_t time
 // Stub for HW encoder initialization
 void encoder_hw_init(struct config_t *ctx)
 {
-    printf("[ ENCODER INIT ] HW encoder will be initialized for codec: %s\n", codec_type_name(ctx->codec));
+    INFO_M("ENCODER INIT", "HW encoder will be initialized for codec: %s", codec_type_name(ctx->codec));
     // TODO: Place HW encoder initialization here (e.g., MPP/VPU)
 
     decoder_start(ctx);
@@ -149,30 +152,32 @@ void encoder_hw_init(struct config_t *ctx)
 static void* rtp_receiver_thread(void *arg)
 {
     if (!arg) {
-        fprintf(stderr, "[ RTP ] Invalid context provided to RTP receiver thread\n");
+        ERROR("Invalid context provided to RTP receiver thread");
         return NULL;
     }
 
     struct config_t *ctx = (struct config_t *)arg;
 
-    printf("[ RTP ] Starting RTP receiver thread on %s:%d\n", ctx->ip, ctx->port);
+    INFO_M("RTP", "Starting RTP receiver thread on %s:%d", ctx->ip, ctx->port);
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { perror("socket"); return NULL; }
+    if (sock < 0) { PERROR_M("RTP", "socket: "); return NULL; }
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(ctx->port);
     if (inet_aton(ctx->ip, &addr.sin_addr) == 0) {
-        fprintf(stderr, "[ RTP ] Invalid IP: %s\n", ctx->ip);
+        ERROR_M("RTP", "Invalid IP: %s", ctx->ip);
         close(sock);
         return NULL;
     }
     if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("bind"); close(sock); return NULL;
+        PERROR_M("RTP", "bind: ");
+        close(sock);
+        return NULL;
     }
 
-    printf("[ RTP ] Listening on %s:%d\n", ctx->ip, ctx->port);
+    INFO_M("RTP", "Listening on %s:%d", ctx->ip, ctx->port);
 
     // RTP demuxer for detection
     uint8_t buffer[1600];
@@ -182,7 +187,7 @@ static void* rtp_receiver_thread(void *arg)
             100, 90000, ctx->pt, NULL, detect_codec_cb, &detected_codec
     );
     if (!demuxer) {
-        fprintf(stderr, "[ RTP ] Failed to create RTP demuxer for detection\n");
+        ERROR_M("RTP", "Failed to create RTP demuxer for detection");
         close(sock);
         return NULL;
     }
@@ -190,7 +195,7 @@ static void* rtp_receiver_thread(void *arg)
     // Wait until codec is detected (single-thread, blocking)
     while (running && detected_codec == CODEC_UNKNOWN) {
         int ret = poll(fds, 1, 5000);
-        if (ret < 0) { if (errno == EINTR) continue; perror("poll"); break; }
+        if (ret < 0) { if (errno == EINTR) continue; PERROR_M("RTP", "poll: "); break; }
         if (ret == 0) continue;
         if (fds[0].revents & POLLIN) {
             struct sockaddr_in peer; socklen_t len = sizeof(peer);
@@ -201,7 +206,7 @@ static void* rtp_receiver_thread(void *arg)
     rtp_demuxer_destroy(&demuxer);
 
     if (detected_codec == CODEC_UNKNOWN) {
-        fprintf(stderr, "[ RTP ] Failed to detect codec from RTP stream!\n");
+        ERROR_M("RTP", "Failed to detect codec from RTP stream!");
         close(sock);
         return NULL;
     }
@@ -217,7 +222,7 @@ static void* rtp_receiver_thread(void *arg)
     } else if (ctx->codec == CODEC_H265) {
         codec_name = "H265";
     } else {
-        fprintf(stderr, "[ RTP ] Unsupported codec detected: %s\n", codec_type_name(ctx->codec));
+        ERROR_M("RTP", "Unsupported codec detected: %s", codec_type_name(ctx->codec));
         close(sock);
         return NULL;
     }
@@ -230,7 +235,7 @@ static void* rtp_receiver_thread(void *arg)
             main_rtp_cb, ctx
     );
     if (!demuxer) {
-        fprintf(stderr, "[ RTP ] Failed to create main RTP demuxer\n");
+        ERROR_M("RTP", "Failed to create main RTP demuxer");
         close(sock);
         return NULL;
     }
@@ -238,7 +243,7 @@ static void* rtp_receiver_thread(void *arg)
     // packet reception loop
     while (atomic_load(&running)) {
         int ret = poll(fds, 1, 1000);
-        if (ret < 0) { if (errno == EINTR) continue; perror("poll"); break; }
+        if (ret < 0) { if (errno == EINTR) continue; PERROR_M("RTP", "poll: "); break; }
         if (ret == 0) continue;
         if (fds[0].revents & POLLIN) {
             struct sockaddr_in peer; socklen_t len = sizeof(peer);
@@ -250,7 +255,7 @@ static void* rtp_receiver_thread(void *arg)
     rtp_demuxer_destroy(&demuxer);
     close(sock);
 
-    printf("[ RTP ] Exiting RTP receiver thread\n");
+    INFO_M("RTP", "Exiting RTP receiver thread");
 
     atomic_store(&running, 0);
 
@@ -261,7 +266,7 @@ int rtp_receiver_start(struct config_t *cfg)
 {
     int expected = 0;
     if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
-        printf("[ RTP ] Already running RTP receiver thread\n");
+        INFO_M("RTP", "Already running RTP receiver thread");
         return -1;
     }
     return pthread_create(&rtp_thread, NULL, rtp_receiver_thread, cfg);
