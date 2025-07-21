@@ -45,7 +45,6 @@
 static pthread_t rtp_thread;
 static atomic_int running = 0;
 
-const char *module_name_str = "RTP";
 
 static const char* codec_type_name(codec_type_t codec)
 {
@@ -152,7 +151,7 @@ void encoder_hw_init(struct config_t *ctx)
 static void* rtp_receiver_thread(void *arg)
 {
     if (!arg) {
-        ERROR("Invalid context provided to RTP receiver thread");
+        ERROR_M("RTP", "Invalid context provided to RTP receiver thread");
         return NULL;
     }
 

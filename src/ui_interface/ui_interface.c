@@ -10,14 +10,9 @@
 #include <sys/time.h>
 #include <math.h>
 #include <string.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <linux/joystick.h>
+#include "joystick.h"
+#include "tracked_timer.h"
 
-// Store our timers for cleanup
-#define MAX_TIMERS 10
-static lv_timer_t *app_timers[MAX_TIMERS] = {0};
-static int timer_count = 0;
 
 // LVGL display buffer
 static lv_disp_draw_buf_t disp_buf;
@@ -38,6 +33,9 @@ typedef struct {
     lv_obj_t *battery;  // Battery percentage label
     lv_obj_t *clock;   // Clock label
     lv_obj_t *curr_button; // Current button label
+    lv_obj_t *notification; // Notification label
+    lv_obj_t *notification_bar; // Notification bar
+    lv_timer_t *notification_timer; // Timer for notification
 } ui_elements_t;
 
 typedef struct {
@@ -48,131 +46,6 @@ typedef struct {
 
 ui_elements_t ui_elements = {0};
 ui_values_t ui_values = {0};
-
-// Joystick handling
-static int joystick_fd = -1;
-static pthread_t joystick_thread;
-static bool joystick_running = false;
-static char current_button_text[32] = "none";
-
-// Joystick button names for display
-static const char* button_names[] = {
-    "B", "A", "X", "Y", "LB", "RB", "LT", "RT", 
-    "Select", "Start", "??", "L3", "R3", "UP", "DOWN", "LEFT", "RIGHT"
-};
-
-/**
- * Joystick reading thread
- */
-static void* joystick_reader_thread(void* arg)
-{
-    struct js_event event;
-    
-    INFO_M("JOYSTICK", "Starting joystick reader thread");
-    
-    while (joystick_running) {
-        if (joystick_fd < 0) {
-            // Try to open joystick
-            joystick_fd = open("/dev/input/js0", O_RDONLY | O_NONBLOCK);
-            if (joystick_fd < 0) {
-                usleep(1000000); // Wait 1 second before retry
-                continue;
-            }
-            INFO_M("JOYSTICK", "Connected to /dev/input/js0");
-        }
-        
-        ssize_t bytes = read(joystick_fd, &event, sizeof(event));
-        if (bytes == sizeof(event)) {
-            // Process joystick event
-            if (event.type == JS_EVENT_BUTTON) {
-                if (event.value == 1) { // Button pressed
-                    if (event.number < sizeof(button_names)/sizeof(button_names[0])) {
-                        snprintf(current_button_text, sizeof(current_button_text), 
-                                "%s", button_names[event.number]);
-                    } else {
-                        snprintf(current_button_text, sizeof(current_button_text), 
-                                "BTN%d", event.number);
-                    }
-                    INFO_M("JOYSTICK", "Button %d (%s) pressed", 
-                           event.number, current_button_text);
-                    
-                    // Handle menu navigation
-                    menu_handle_navigation(event.number);
-                    
-                } else { // Button released
-                    strcpy(current_button_text, "none");
-                    INFO_M("JOYSTICK", "Button %d released", event.number);
-                }
-                
-                // Update UI element if it exists
-                if (ui_elements.curr_button) {
-                    lv_label_set_text(ui_elements.curr_button, current_button_text);
-                }
-            } else if (event.type == JS_EVENT_AXIS) {
-                // Handle axis movement for menu navigation
-                if (menu_is_visible()) {
-                    // Use the new menu system for axis handling
-                    // This could be implemented in menu.c if needed
-                }
-                
-                // Update UI with axis info
-                if (ui_elements.curr_button && !menu_is_visible()) {
-                    lv_label_set_text_fmt(ui_elements.curr_button, "Axis: %d : %d", 
-                                          event.number, event.value);
-                }
-            }
-        } else if (bytes < 0) {
-            // No data available or error
-            if (errno == ENODEV) {
-                INFO_M("JOYSTICK", "Device disconnected");
-                close(joystick_fd);
-                joystick_fd = -1;
-            }
-            usleep(10000); // Wait 10ms
-        }
-    }
-    
-    if (joystick_fd >= 0) {
-        close(joystick_fd);
-        joystick_fd = -1;
-    }
-    
-    INFO_M("JOYSTICK", "Joystick reader thread stopped");
-    return NULL;
-}
-
-/**
- * Initialize joystick handling
- */
-static int init_joystick(void)
-{
-    joystick_running = true;
-    
-    if (pthread_create(&joystick_thread, NULL, joystick_reader_thread, NULL) != 0) {
-        ERROR_M("JOYSTICK", "Failed to create joystick thread");
-        joystick_running = false;
-        return -1;
-    }
-    
-    pthread_detach(joystick_thread);
-    INFO_M("JOYSTICK", "Joystick handling initialized");
-    return 0;
-}
-
-/**
- * Cleanup joystick handling
- */
-static void cleanup_joystick(void)
-{
-    joystick_running = false;
-    
-    if (joystick_fd >= 0) {
-        close(joystick_fd);
-        joystick_fd = -1;
-    }
-    
-    INFO_M("JOYSTICK", "Joystick handling cleaned up");
-}
 
 /**
  * Update drone telemetry values
@@ -475,16 +348,27 @@ void ui_interface_update(void)
     if (!buf1 || !buf2) return;
     
     static uint32_t last_update = 0;
+    static uint32_t last_cleanup = 0;
+    static uint32_t last_present = 0;
     uint32_t current_time = lv_tick_get();
     
-    // Limit to ~30 FPS
+    // Limit to ~30 FPS for LVGL updates
     if (current_time - last_update < 33) {
         return;
     }
     last_update = current_time;
     
     pthread_mutex_lock(&lvgl_mutex);
+    
+    // Handle LVGL timers and drawing
     lv_timer_handler();
+    
+    // Periodically cleanup timer array (every 5 seconds)
+    if (current_time - last_cleanup > 5000) {
+        cleanup_tracked_timers();
+        last_cleanup = current_time;
+    }
+    
     pthread_mutex_unlock(&lvgl_mutex);
     
     compositor_present_frame();
@@ -496,16 +380,9 @@ void ui_interface_deinit(void)
     cleanup_joystick();
     
     pthread_mutex_lock(&lvgl_mutex);
-    
-    // Delete all animations to prevent callbacks after deinitialization
+
     // Delete our tracked timers
-    for (int i = 0; i < timer_count; i++) {
-        if (app_timers[i]) {
-            lv_timer_del(app_timers[i]);
-            app_timers[i] = NULL;
-        }
-    }
-    timer_count = 0;
+    remove_all_tracked_timers();
     
     // Clean up LVGL
     if (disp != NULL) {
@@ -538,23 +415,6 @@ void ui_interface_deinit(void)
     compositor_deinit();
     
     INFO_M("LVGL", "Deinitialized");
-}
-
-/**
- * Helper function to create and track a timer
- */
-static lv_timer_t* create_tracked_timer(lv_timer_cb_t timer_cb, uint32_t period, void *user_data)
-{
-    if (timer_count >= MAX_TIMERS) {
-        WARN_M("LVGL", "Maximum number of timers reached");
-        return NULL;
-    }
-    
-    lv_timer_t *timer = lv_timer_create(timer_cb, period, user_data);
-    if (timer) {
-        app_timers[timer_count++] = timer;
-    }
-    return timer;
 }
 
 /**
@@ -651,29 +511,66 @@ void lvgl_create_ui(void)
     lv_obj_set_style_text_color(ui_elements.curr_button, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui_elements.curr_button, LV_OPA_TRANSP, LV_PART_MAIN);
 
-    // // Bottom status bar
-    // lv_obj_t *bottom_bar = lv_obj_create(lv_scr_act());
-    // lv_obj_set_size(bottom_bar, width - 20, 60);
-    // lv_obj_align(bottom_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
-    // lv_obj_set_style_bg_color(bottom_bar, lv_color_make(0, 0, 0), LV_PART_MAIN);
-    // lv_obj_set_style_bg_opa(bottom_bar, LV_OPA_80, LV_PART_MAIN);
-    // lv_obj_set_style_border_width(bottom_bar, 1, LV_PART_MAIN);
-    // lv_obj_set_style_border_color(bottom_bar, lv_color_white(), LV_PART_MAIN);
-    // lv_obj_set_style_radius(bottom_bar, 5, LV_PART_MAIN);
-    // mark_static_object(bottom_bar);
+    // Bottom notification bar
+    ui_elements.notification_bar = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(ui_elements.notification_bar, width / 2, 60);
+    lv_obj_align(ui_elements.notification_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(ui_elements.notification_bar, lv_color_make(0, 0, 255), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_elements.notification_bar, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ui_elements.notification_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ui_elements.notification_bar, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_radius(ui_elements.notification_bar, 5, LV_PART_MAIN);
+    mark_static_object(ui_elements.notification_bar);
 
-    // // Recording status (bottom center)
-    // lv_obj_t *rec_label = lv_label_create(bottom_bar);
-    // lv_label_set_text(rec_label, "REC 02:34");
-    // lv_obj_align(rec_label, LV_ALIGN_CENTER, 0, 0);
-    // lv_obj_set_style_text_color(rec_label, lv_color_make(255, 0, 0), LV_PART_MAIN);
-    // mark_static_object(rec_label);
+    // Recording status (bottom center)
+    ui_elements.notification = lv_label_create(ui_elements.notification_bar);
+    lv_label_set_text(ui_elements.notification, "Starting...");
+    lv_obj_set_style_text_font(ui_elements.notification, default_font, LV_PART_MAIN);
+    lv_obj_align(ui_elements.notification, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_text_color(ui_elements.notification, lv_color_make(255, 128, 0), LV_PART_MAIN);
+    mark_static_object(ui_elements.notification);
+
+    show_notification_with_timeout("Starting...");
 
     INFO_M("LVGL", "Drone HUD UI created successfully");
     pthread_mutex_unlock(&lvgl_mutex);
 
     lvgl_create_menu();
+}
 
+/**
+ * Direct notification timeout callback - hides notification immediately
+ * Delete here to avoid issues rendering UI from a timer callback
+ */
+static void hide_notification_callback(lv_timer_t *timer) 
+{
+    if (ui_elements.notification_bar) {
+        lv_obj_add_flag(ui_elements.notification_bar, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    ui_elements.notification_timer = NULL;
+}
+
+void show_notification_with_timeout(const char *text)
+{
+    show_notification(text);
+    
+    if (ui_elements.notification_timer) {
+        lv_timer_reset(ui_elements.notification_timer);
+    } else {
+        ui_elements.notification_timer = create_tracked_timer(hide_notification_callback, 1500, NULL);
+        lv_timer_set_repeat_count(ui_elements.notification_timer, 1); // Run only once
+    }
+}
+
+void show_notification(const char *text)
+{
+        if (ui_elements.notification && ui_elements.notification_bar) {
+        lv_label_set_text(ui_elements.notification, text);
+        lv_obj_clear_flag(ui_elements.notification_bar, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        ERROR_M("LVGL", "Notification label not initialized");
+    }
 }
 
 void lvgl_create_menu()

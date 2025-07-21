@@ -1,4 +1,7 @@
-#pragma once
+#ifndef LOG_H
+#define LOG_H
+
+#include <stdio.h>
 
 #define ENABLE_DEBUG 0
 
@@ -42,4 +45,5 @@
          snprintf(buf, sizeof(buf), "[ERROR] [%s]: " x, module, ##__VA_ARGS__); \
          perror(buf); \
     } while (0)
-    
+
+#endif // LOG_H

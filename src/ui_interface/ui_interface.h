@@ -43,4 +43,18 @@ void lvgl_create_menu();
  */
 void ui_update_wfb_ng_telemetry(const wfb_rx_status *st);
 
+/**
+ * Show a notification message on the UI
+ * @param text The notification text to display
+ * @param timeout Duration in milliseconds to show the notification
+ */
+void show_notification_with_timeout(const char *text);
+
+/**
+ * Show a notification message with default timeout
+ * @param text The notification text to display
+ */
+void show_notification(const char *text);
+
+
 #endif // VD_LINK_UI_INTERFACE_H
