@@ -152,18 +152,18 @@ void msp_osd_displayport_rx_callback(const char* data, size_t size)
         return;
     }
 
-    INFO_M("Received displayport data of size %zu %s", module_name_str, size, data);
+    INFO_M("Received displayport data of size %zu '%.*s'", module_name_str, size, size, data);
     // msp_osd_update_displayport_data(data, size);
 }
 
-void msp_osd_cmd_rx_callback(const link_command_pkt_t* cmd)
+void msp_osd_cmd_rx_callback(link_command_id_t cmd_id, const void* data, size_t size)
 {
-    if (cmd == NULL) {
-        INFO_M("No command received", module_name_str);
+    if (data == NULL && size == 0) {
+        INFO_M("Bad command received", module_name_str);
         return;
     }
 
-    INFO_M("Received command with ID %u", module_name_str, cmd->cmd_id);
+    INFO_M("Received command with ID %u", module_name_str, cmd_id);
     // msp_osd_handle_command(cmd);
 }
 
