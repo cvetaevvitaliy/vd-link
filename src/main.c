@@ -39,6 +39,7 @@
 #include "msp-osd.h"
 #include "wfb_status_link.h"
 #include "log.h"
+#include "link.h"
 
 static const char *module_name_str = "MAIN";
 #define MAIN_DEBUG 0
@@ -149,6 +150,45 @@ void wfb_status_link_callback(const wfb_rx_status *st)
     osd_wfb_status_link_callback(st);
 }
 
+void link_sys_telemetry_cb(float cpu_temp, float cpu_usage)
+{
+    INFO_M("CPU Temp: %.2f C, CPU Usage: %.2f%%", module_name_str, cpu_temp, cpu_usage);
+    // msp_osd_update_sys_telemetry(cpu_temp, cpu_usage);
+}
+
+void msp_osd_detection_rx_callback(const link_detection_box_t* data, size_t count)
+{
+    if (data == NULL || count == 0) {
+        INFO_M("No detection results received", module_name_str);
+        return;
+    }
+
+    INFO_M("Received %d detection results", module_name_str, count);
+    // msp_osd_update_detection_results(data);
+}
+
+void msp_osd_displayport_rx_callback(const char* data, size_t size)
+{
+    if (data == NULL || size == 0) {
+        INFO_M("No displayport data received", module_name_str);
+        return;
+    }
+
+    INFO_M("Received displayport data of size %zu %s", module_name_str, size, data);
+    // msp_osd_update_displayport_data(data, size);
+}
+
+void msp_osd_cmd_rx_callback(const link_command_pkt_t* cmd)
+{
+    if (cmd == NULL) {
+        INFO_M("No command received", module_name_str);
+        return;
+    }
+
+    INFO_M("Received command with ID %u", module_name_str, cmd->cmd_id);
+    // msp_osd_handle_command(cmd);
+}
+
 int main(int argc, char* argv[])
 {
     struct config_t config = {
@@ -177,6 +217,16 @@ int main(int argc, char* argv[])
     wfb_status_link_start(config.ip, config.wfb_port, wfb_status_link_callback);
 
     rtp_receiver_start(&config);
+
+    if (link_init(LINK_PORT+1, LINK_PORT) != 0) {
+        ERROR("Failed to initialize link module");
+    } else {
+        link_register_sys_telemetry_rx_cb(link_sys_telemetry_cb);
+        link_register_detection_rx_cb(msp_osd_detection_rx_callback);
+        link_register_displayport_rx_cb(msp_osd_displayport_rx_callback);
+        link_register_cmd_rx_cb(msp_osd_cmd_rx_callback);
+        INFO("Link module initialized successfully");
+    }
 
     while (running) {
         // Update LVGL UI and compositor

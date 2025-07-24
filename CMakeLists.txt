@@ -34,6 +34,7 @@ set(LVGL_BUILD_SHARED OFF CACHE BOOL "Build LVGL as a static library" FORCE)
 FetchContent_MakeAvailable(lvgl)
 
 add_subdirectory(librtp)
+add_subdirectory(src/link)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
@@ -65,6 +66,10 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui_interface  # For lv_conf.h
+)
+
+target_include_directories(link PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 set(MSP_OSD_SRC
@@ -108,6 +113,7 @@ target_link_libraries(${PROJECT_NAME} m rtp pthread
         ${ZLIB_LIBRARIES}
         ${MSGPACK_LIBRARIES}
         lvgl::lvgl
+        link
 )
 
 

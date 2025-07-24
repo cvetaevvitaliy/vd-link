@@ -1,0 +1,3 @@
+[submodule "src/link"]
+	path = src/link
+	url = git@gitlab.hard-tech.org.ua:digital_link/link.git
