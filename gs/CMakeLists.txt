@@ -1,17 +1,27 @@
 cmake_minimum_required(VERSION 2.8...3.13)
 project(vd-link C)
 
+set(CMAKE_C_FLAGS_DEBUG "-O1 -g3")
+set(CMAKE_C_FLAGS_RELEASE "-O2")
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
 # Default to Release if not specified
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (Debug, Release)" FORCE)
 endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-set(CMAKE_C_FLAGS_DEBUG "-O1 -g3")
-set(CMAKE_C_FLAGS_RELEASE "-O2")
+# LVGL configuration
+set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src" CACHE STRING "Path to lv_conf.h dir" FORCE)
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
+# disable LVGL examples and demos
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "Disable LVGL examples" FORCE)
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "Disable LVGL demos" FORCE)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lvgl)
+message(STATUS "LVGL version: ${LVGL_VERSION}")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
@@ -39,6 +49,7 @@ include_directories(${PROJECT_NAME}
         ${LIBRGA_INCLUDE_DIRS}
         ${ROCKCHIPMPP_INCLUDE_DIRS}
         ${MSGPACK_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/lvgl
         ${CMAKE_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
 )
@@ -72,7 +83,7 @@ add_executable(${PROJECT_NAME}
         src/wfb_status_link.c
 )
 
-target_link_libraries(${PROJECT_NAME} m rtp
+target_link_libraries(${PROJECT_NAME} m rtp lvgl
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}
