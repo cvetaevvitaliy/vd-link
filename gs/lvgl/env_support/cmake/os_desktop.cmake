@@ -276,7 +276,7 @@ if(CONFIG_LV_BUILD_DEMOS)
 endif()
 
 ############################## INSTALLATION ######################################
-
+if (LVGL_ENABLE_INSTALL)
 # Library and headers can be installed to system using make install
 file(GLOB LVGL_PUBLIC_HEADERS
     "${LVGL_ROOT_DIR}/lvgl.h"
@@ -423,6 +423,7 @@ if(CONFIG_LV_BUILD_EXAMPLES)
         RUNTIME DESTINATION "${RUNTIME_INSTALL_DIR}"
         PUBLIC_HEADER DESTINATION "${INC_INSTALL_DIR}")
 
+endif()
 endif()
 
 ############################## SET GLOBAL VARIABLES ######################################
