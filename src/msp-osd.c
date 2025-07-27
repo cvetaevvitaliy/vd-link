@@ -347,7 +347,7 @@ void wfb_status_link_callback(const wfb_rx_status *st)
 {
     char str[128];
     int len = 0;
-    if (st->ants_count > 0) {
+    if (st->ants_count > 0 && strstr(st->id, "video")) {
         memset(overlay_character_map, 0, sizeof(overlay_character_map));
         // freq, link quality symbol, rssi_avg, bitrate
         len = snprintf(str, sizeof(str), "%d " CHAR_LINK_BW "%.1f " CHAR_LINK_LQ "%d",
