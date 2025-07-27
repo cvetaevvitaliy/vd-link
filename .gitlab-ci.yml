@@ -14,7 +14,7 @@ build-gs:
     - mkdir -p build-gs
     - cd build-gs
     - cmake -DPLATFORM=gs -DCMAKE_INSTALL_PREFIX=../artifacts/gs -DCMAKE_TOOLCHAIN_FILE=$SDK_PATH/share/buildroot/toolchainfile.cmake ..
-    - make -j`$(nproc)`
+    - make -j$(nproc)
     - make install
     - cd ..
   artifacts:
@@ -32,7 +32,7 @@ build-drone:
     - mkdir -p build-drone
     - cd build-drone
     - cmake -DPLATFORM=drone -DCMAKE_INSTALL_PREFIX=../artifacts/drone -DCMAKE_TOOLCHAIN_FILE=$SDK_PATH/share/buildroot/toolchainfile.cmake ..
-    - make -j`$(nproc)`
+    - make -j$(nproc)
     - make install
     - cd ..
   artifacts:
