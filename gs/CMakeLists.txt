@@ -19,6 +19,7 @@ set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src" CACHE STRING "Path to lv
 # disable LVGL examples and demos
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "Disable LVGL examples" FORCE)
 set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "Disable LVGL demos" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lvgl)
 message(STATUS "LVGL version: ${LVGL_VERSION}")
@@ -83,7 +84,7 @@ add_executable(${PROJECT_NAME}
         src/wfb_status_link.c
 )
 
-target_link_libraries(${PROJECT_NAME} m rtp lvgl
+target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}
