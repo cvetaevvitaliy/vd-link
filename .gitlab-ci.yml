@@ -1,21 +1,44 @@
-stages:          # List of stages for jobs, and their order of execution
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_DEPTH: 1
+
+stages:
   - build
 
-build-job:       # This job runs in the build stage.
+# Build for Ground Station (e.g. RK3566)
+build-gs:
   stage: build
   script:
-    - echo "Compiling the project ..."
-    # SDK and toolchain are prepared in the directory /opt/aarch64-buildroot-linux-gnu_sdk-buildroot
+    - echo "▶️ Building for PLATFORM=gs"
     - source /opt/aarch64-buildroot-linux-gnu_sdk-buildroot/environment-setup
-    - mkdir build
-    - cd build
-    - cmake -DCMAKE_INSTALL_PREFIX=../artifacts -DCMAKE_TOOLCHAIN_FILE=$SDK_PATH/share/buildroot/toolchainfile.cmake ..
-    - make -j24
+    - mkdir -p build-gs
+    - cd build-gs
+    - cmake -DPLATFORM=gs -DCMAKE_INSTALL_PREFIX=../artifacts/gs -DCMAKE_TOOLCHAIN_FILE=$SDK_PATH/share/buildroot/toolchainfile.cmake ..
+    - make j`$(nproc)`
     - make install
-    - echo "Compile complete."
+    - echo "✅ Build complete: gs"
     - cd ..
-
   artifacts:
     paths:
-      - artifacts/*
-    expire_in: 2 week
+      - artifacts/gs/*
+      - build-gs/*
+    expire_in: 2 weeks
+
+# Build for Drone (e.g. RV1126)
+build-drone:
+  stage: build
+  script:
+    - echo "▶️ Building for PLATFORM=drone"
+    - source /opt/vision-sdk/environment-setup
+    - mkdir -p build-drone
+    - cd build-drone
+    - cmake -DPLATFORM=drone -DCMAKE_INSTALL_PREFIX=../artifacts/drone -DCMAKE_TOOLCHAIN_FILE=$SDK_PATH/share/buildroot/toolchainfile.cmake ..
+    - make j`$(nproc)`
+    - make install
+    - echo "✅ Build complete: drone"
+    - cd ..
+  artifacts:
+    paths:
+      - artifacts/drone/*
+      - build-drone/*
+    expire_in: 2 weeks
