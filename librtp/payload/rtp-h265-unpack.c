@@ -280,6 +280,7 @@ static int rtp_h265_unpack_input(void* p, const void* packet, int bytes)
 	case 34: // picture parameter set (PPS)
 	case 39: // supplemental enhancement information (SEI)
 	default: // 4.4.1. Single NAL Unit Packets (p24)
+    {
         uint8_t* nal_buf = alloca(pkt.payloadlen + 4);
         memcpy(nal_buf, "\x00\x00\x00\x01", 4);
         memcpy(nal_buf + 4, ptr, pkt.payloadlen);
@@ -287,6 +288,7 @@ static int rtp_h265_unpack_input(void* p, const void* packet, int bytes)
         unpacker->flags = 0;
         unpacker->size = 0;
         return 0 == r ? 1 : r;
+    }
 	}
 }
 
