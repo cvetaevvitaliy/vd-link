@@ -15,6 +15,7 @@
 #include <rga/im2d_buffer.h>
 #include <rga/im2d_single.h>
 #include <rga/rga.h>
+#include "menu.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -170,6 +171,7 @@ int ui_init(void)
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_0, LV_PART_MAIN);
 
     // init_joystick();
+    menu_create(lv_scr_act());
 
     ui_interface_init(disp);
 

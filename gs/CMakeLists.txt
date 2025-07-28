@@ -76,6 +76,8 @@ set(MSP_OSD_SRC
         src/msp-osd/util/fs_util.c
         src/ui/ui.c
         src/ui/ui_interface.c
+        src/ui/menu.c
+        src/ui/input.c
 )
 
 add_executable(${PROJECT_NAME}
