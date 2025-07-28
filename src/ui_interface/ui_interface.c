@@ -47,6 +47,10 @@ typedef struct {
 ui_elements_t ui_elements = {0};
 ui_values_t ui_values = {0};
 
+lv_color_t color_ht_main = LV_COLOR_MAKE(0x12, 0x14, 0x1A);
+lv_color_t color_ht_secondary = LV_COLOR_MAKE(0x28, 0x2A, 0x31);
+lv_color_t color_ht_accent = LV_COLOR_MAKE(0x5B, 0x9F, 0xFF);
+
 /**
  * Update drone telemetry values
  */
@@ -459,7 +463,7 @@ void lvgl_create_ui(void)
     lv_obj_t *top_bar = lv_obj_create(lv_scr_act());
     lv_obj_set_size(top_bar, width - 20, 50);
     lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 10);
-    lv_obj_set_style_bg_color(top_bar, lv_color_make(0, 0, 255), LV_PART_MAIN); // Set blue background
+    lv_obj_set_style_bg_color(top_bar, color_ht_main, LV_PART_MAIN); // Set blue background
     lv_obj_set_style_bg_opa(top_bar, LV_OPA_50, LV_PART_MAIN); // Make background semi-transparent
     lv_obj_set_style_border_width(top_bar, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(top_bar, lv_color_white(), LV_PART_MAIN);

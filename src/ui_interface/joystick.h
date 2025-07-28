@@ -1,6 +1,28 @@
 #ifndef JOYSTICK_H
 #define JOYSTICK_H
 
+
+typedef enum {
+    JOYSTICK_BUTTON_B = 0,
+    JOYSTICK_BUTTON_A,
+    JOYSTICK_BUTTON_X,
+    JOYSTICK_BUTTON_Y,
+    JOYSTICK_BUTTON_LB,
+    JOYSTICK_BUTTON_RB,
+    JOYSTICK_BUTTON_LT,
+    JOYSTICK_BUTTON_RT,
+    JOYSTICK_BUTTON_SELECT,
+    JOYSTICK_BUTTON_START,
+    JOYSTICK_BUTTON_UNKNOWN1, // Placeholder for unknown button
+    JOYSTICK_BUTTON_L3,
+    JOYSTICK_BUTTON_R3,
+    JOYSTICK_BUTTON_UP,
+    JOYSTICK_BUTTON_DOWN,
+    JOYSTICK_BUTTON_LEFT,
+    JOYSTICK_BUTTON_RIGHT
+} joystick_button_t;
+
+
  int init_joystick(void);
  void cleanup_joystick(void);
  

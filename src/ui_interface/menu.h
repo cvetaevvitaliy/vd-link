@@ -3,6 +3,7 @@
 
 #include "ui_interface.h"
 #include <stdbool.h>
+#include "joystick.h"
 
 // Menu navigation structure
 typedef struct {
@@ -20,7 +21,7 @@ int menu_init(void);
 void menu_create_ui(void);
 
 // Handle button navigation
-void menu_handle_navigation(int button_number);
+void menu_handle_navigation(joystick_button_t button_number);
 
 // Update menu selection visual indicator
 void menu_update_selection(void);

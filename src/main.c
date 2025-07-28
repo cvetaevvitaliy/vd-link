@@ -156,10 +156,14 @@ void msp_osd_displayport_rx_callback(const char* data, size_t size)
     // msp_osd_update_displayport_data(data, size);
 }
 
-void msp_osd_cmd_rx_callback(link_command_id_t cmd_id, const void* data, size_t size)
+void msp_osd_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size)
 {
-    if (data == NULL && size == 0) {
-        INFO_M("Bad command received", module_name_str);
+    if (cmd_id == LINK_CMD_GET || cmd_id == LINK_CMD_SET) {
+        INFO_M("Bad command received; Ground station does not support GET/SET commands", module_name_str);
+        return;
+    }
+    if (cmd_id == LINK_CMD_ACK || cmd_id == LINK_CMD_NACK) {
+        INFO_M("Received command acknowledgment", module_name_str);
         return;
     }
 
@@ -196,7 +200,7 @@ int main(int argc, char* argv[])
 
     rtp_receiver_start(&config);
 
-    if (link_init(LINK_PORT+1, LINK_PORT) != 0) {
+    if (link_init(LINK_GROUND_STATION) != 0) {
         ERROR("Failed to initialize link module");
     } else {
         link_register_sys_telemetry_rx_cb(link_sys_telemetry_cb);

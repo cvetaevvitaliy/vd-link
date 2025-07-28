@@ -56,6 +56,8 @@
 #define LV_FONT_MONTSERRAT_16   1
 #define LV_FONT_MONTSERRAT_18   1
 #define LV_FONT_MONTSERRAT_20   1
+#define LV_FONT_MONTSERRAT_30   1
+#define LV_FONT_MONTSERRAT_40   1
 
 /* Animation settings */
 #define LV_USE_ANIMATION        1

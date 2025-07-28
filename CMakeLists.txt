@@ -102,6 +102,7 @@ add_executable(${PROJECT_NAME}
         src/ui_interface/ui_interface.c
         src/ui_interface/compositor.c
         src/ui_interface/menu.c
+        src/ui_interface/menu_navigation.c
         src/ui_interface/joystick.c
         src/ui_interface/tracked_timer.c
 )
