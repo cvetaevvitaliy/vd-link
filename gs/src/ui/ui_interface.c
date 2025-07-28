@@ -16,6 +16,10 @@ static lv_obj_t *notification_area; // Notification area
 static lv_obj_t *notification_label; // Notification label
 static lv_timer_t *notification_timer; // Timer for notifications
 
+lv_color_t color_ht_main = LV_COLOR_MAKE(0x12, 0x14, 0x1A);
+lv_color_t color_ht_secondary = LV_COLOR_MAKE(0x28, 0x2A, 0x31);
+lv_color_t color_ht_accent = LV_COLOR_MAKE(0x5B, 0x9F, 0xFF);
+
 void ui_update_wfb_ng_telemetry(const wfb_rx_status *st)
 {
     if (!st) return;
@@ -105,11 +109,6 @@ static void update_clock(lv_timer_t *t)
 
 int ui_interface_init(lv_display_t *disp)
 {
-
-    lv_color_t color_ht_main = LV_COLOR_MAKE(0x12, 0x14, 0x1A);
-    lv_color_t color_ht_secondary = LV_COLOR_MAKE(0x28, 0x2A, 0x31);
-    lv_color_t color_ht_accent = LV_COLOR_MAKE(0x5B, 0x9F, 0xFF);
-
     lv_obj_t *top_bar = lv_obj_create(lv_scr_act());
     lv_obj_set_size(top_bar, lv_disp_get_hor_res(disp) - 20, 50);
     lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 10);

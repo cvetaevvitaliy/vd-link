@@ -2,6 +2,11 @@
 #include "log.h"
 
 static const char *module_name_str = "MENU";
+
+extern lv_color_t color_ht_main;
+extern lv_color_t color_ht_secondary;
+extern lv_color_t color_ht_accent;
+
 lv_obj_t *menu;
 bool menu_visible = false;
 
@@ -41,10 +46,13 @@ void menu_hide(void)
 void menu_create(lv_obj_t *parent)
 {
     menu = lv_obj_create(parent);
-    lv_obj_set_size(menu, 200, 300);
+    lv_obj_set_size(menu, 960, 520);
     lv_obj_align(menu, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(menu, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(menu, color_ht_main, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(menu, LV_OPA_80, LV_PART_MAIN);
+
+
+    
 }
 
 void menu_destroy(void)
