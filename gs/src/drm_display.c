@@ -27,6 +27,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <linux/dma-buf.h>
+#include <poll.h>
 
 #define DRM_DEBUG 0
 #define DRM_DEBUG_ROTATE 0
@@ -66,7 +67,7 @@ static atomic_int running = 0;
 static pthread_t drm_thread;
 static atomic_int pending_commit = 0;
 
-#define OSD_BUF_COUNT 2
+#define OSD_BUF_COUNT 3
 #define MAX_VIDEO_BUFS 16
 #define ROTATE_BUF_COUNT (MAX_VIDEO_BUFS)
 
@@ -79,9 +80,10 @@ struct {
     int dirty[OSD_BUF_COUNT];
     int osd_width;
     int osd_height;
-    int cur;
-    int next;
-} osd_db = { {0,0}, 0, 1 };
+    int display_idx;   // Currently shown on screen (DRM is displaying)
+    int ready_idx;     // Contains next OSD to be committed (prepared, but not displayed yet)
+    int render_idx;    // Buffer for RGA/CPU to render the next OSD frame (not yet committed)
+} osd_db = { {0,0,0}, 0, 0, 1, 2 };
 
 struct {
     int dma_fd[MAX_VIDEO_BUFS];
@@ -100,6 +102,7 @@ struct rotate_video_pool_t {
     int count;
 } rotate_video_pool = {0};
 
+static drm_osd_frame_done_cb_t osd_frame_done_cb = NULL;
 
 static int drm_get_prop_id(int fd, uint32_t obj_id, uint32_t obj_type, const char *name);
 static int64_t drm_get_prop_value(int fd, uint32_t obj_id, uint32_t obj_type, const char *name);
@@ -1145,23 +1148,27 @@ static void drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, 
     prev_usec = usec;
 #endif
 
-    if (cleanup.drm_fd >= 0) {
-
-        if (osd_db.dirty[osd_db.next]) {
-            osd_db.cur ^= 1;
-            osd_db.next ^= 1;
-            osd_db.dirty[osd_db.cur] = 0;
-        }
-
-        if (video_buf_map.dirty[video_buf_map.cur]) {
-            video_buf_map.dirty[video_buf_map.cur] = 0;
-        }
-        int video_cur = video_buf_map.cur;
-
-        drm_atomic_commit_all_buffers(cleanup.ctx, &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
-                                      video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
-                                      video_buf_map.video_width, video_buf_map.video_height);
+    // OSD: check if the ready buffer is dirty (new frame rendered)
+    if (osd_db.dirty[osd_db.ready_idx]) {
+        // Swap: make ready_idx the display_idx
+        osd_db.display_idx = osd_db.ready_idx;
+        osd_db.dirty[osd_db.display_idx] = 0;
+        if (osd_frame_done_cb)
+            osd_frame_done_cb();
     }
+
+    // Video: check if the current video buffer is dirty (new video frame)
+    int video_cur = video_buf_map.cur;
+    if (video_buf_map.dirty[video_cur]) {
+        video_buf_map.dirty[video_cur] = 0;
+    }
+
+        drm_atomic_commit_all_buffers(
+            cleanup.ctx,
+            &osd_bufs[osd_db.display_idx], osd_db.osd_width, osd_db.osd_height,
+            video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
+            video_buf_map.video_width, video_buf_map.video_height
+        );
 }
 
 static void drm_init_event_context(void)
@@ -1189,13 +1196,15 @@ static int drm_create_osd_buff_pool(struct drm_context_t *ctx)
         ret = drm_create_dumb_argb8888_fb(ctx, width, height, &osd_bufs[i]);
         if (ret < 0) {
             fprintf(stderr, "OSD dumb fb init failed for slot %d\n", i);
+            return ret;
         }
         osd_db.dirty[i] = 0;
     }
     osd_db.osd_width = width;
     osd_db.osd_height = height;
-    osd_db.cur = 0;
-    osd_db.next = 1;
+    osd_db.display_idx = 0;
+    osd_db.ready_idx   = 1;
+    osd_db.render_idx  = 2;
 
     printf("[ DRM ] OSD buffer pool created successfully\n");
     return ret;
@@ -1288,38 +1297,82 @@ static void drm_cleanup_osd_buff_pool(struct drm_context_t *ctx)
     }
     osd_db.osd_width = 0;
     osd_db.osd_height = 0;
-    osd_db.cur = 0;
-    osd_db.next = 1;
 }
 
-int drm_get_osd_frame_size(int *width, int *height, int *rotate)
+void drm_set_osd_frame_done_callback(drm_osd_frame_done_cb_t cb)
 {
-    if (width) *width = osd_db.osd_width;
-    if (height) *height = osd_db.osd_height;
-    if (rotate) *rotate = drm_context.rotate;
-    if (osd_db.osd_width <= 0 || osd_db.osd_height <= 0) {
-        fprintf(stderr, "[ DRM ] OSD frame size is not initialized!\n");
-        return -1;
+    osd_frame_done_cb = cb;
+}
+
+void drm_push_new_osd_frame(const void *src_addr, int width, int height)
+{
+#if DRM_DEBUG_ROTATE
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+#endif
+    if (width != OSD_WIDTH || height != OSD_HEIGHT) {
+        printf("[ DRM ] OSD frame must be %dx%d - yours is: %dx%d\n", OSD_WIDTH, OSD_HEIGHT, width, height);
+        return;
     }
-    return 0;
-}
+    int render = osd_db.render_idx;
+    struct drm_fb_t *fb = &osd_bufs[render];
+    int rotate = drm_context.rotate;
+    // Clear previous frame
+    memset(fb->buff_addr, 0x00, OSD_WIDTH * OSD_HEIGHT * 4);
 
-void drm_push_new_osd_frame(void)
-{
-    osd_db.dirty[osd_db.next] = 1;
-}
+    if (rotate == 0) {
+        // No rotation: direct copy
+        imcopy(
+            wrapbuffer_virtualaddr((void*)src_addr, width, height, RK_FORMAT_RGBA_8888),
+            wrapbuffer_virtualaddr(fb->buff_addr, width, height, RK_FORMAT_RGBA_8888)
+        );
+    } else {
+        // Rotation is needed
+        // Allocate a temporary DMA buffer for input (if needed), or use src_addr if already in DMA
+        // Here we assume src_addr is CPU pointer (not DMA), so use software buffer as src, fb as dst
 
-void *drm_get_next_osd_fb(void)
-{
-    if (osd_db.dirty[osd_db.next] == 0 && osd_bufs[osd_db.next].buff_addr) {
-        return osd_bufs[osd_db.next].buff_addr;
+        // Use rga_argb8888_rotate: src_fd = -1 means use CPU buffer directly
+        // Your rga_argb8888_rotate expects FD, but for mmap'd CPU buffers you can use imrotate directly.
+
+        // For RGA, need to create src/dst buffer descriptors:
+        rga_buffer_t src = wrapbuffer_virtualaddr((void*)src_addr, width, height, RK_FORMAT_RGBA_8888);
+        rga_buffer_t dst;
+
+        if (rotate == 90 || rotate == 270) {
+            dst = wrapbuffer_virtualaddr(fb->buff_addr, height, width, RK_FORMAT_RGBA_8888); // Swapped!
+        } else {
+            dst = wrapbuffer_virtualaddr(fb->buff_addr, width, height, RK_FORMAT_RGBA_8888);
+        }
+
+        int rga_rot;
+        if (rotate == 90)
+            rga_rot = IM_HAL_TRANSFORM_ROT_90;
+        else if (rotate == 180)
+            rga_rot = IM_HAL_TRANSFORM_ROT_180;
+        else if (rotate == 270)
+            rga_rot = IM_HAL_TRANSFORM_ROT_270;
+        else
+            rga_rot = 0;
+
+        int ret = imrotate(src, dst, rga_rot);
+        if (ret != IM_STATUS_SUCCESS) {
+            printf("[ DRM ] Failed to rotate OSD frame %d\n", ret);
+        }
+
+#if DRM_DEBUG_ROTATE
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        long usec = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
+        double ms = usec / 1000.0;
+        printf("[ RGA ] OSD frame rotate completed %.3f ms\n", ms);
+#endif
     }
-    fprintf(stderr, "[ DRM ] OSD buffer %d is dirty or not available\n", osd_db.next);
-    // force dirty to ensure next frame
-    osd_db.cur ^= 1;
-    osd_db.next ^= 1;
-    osd_db.dirty[osd_db.cur] = 0;
-    return NULL;
+
+    // Mark as ready to commit
+    osd_db.dirty[render] = 1;
+    // Swap ready/render indexes for next cycle
+    int prev_ready = osd_db.ready_idx;
+    osd_db.ready_idx = render;
+    osd_db.render_idx = prev_ready;
 }
 
 static int get_next_rotate_dma_fd(struct drm_context_t *ctx, int width, int height, int hor_stride, int ver_stride)
@@ -1519,7 +1572,7 @@ static void* compositor_thread(void* arg)
     // Force initial commit to display the first frame
     int video_cur = video_buf_map.cur;
     drm_atomic_commit_all_buffers(ctx,
-                                  &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                  &osd_bufs[osd_db.display_idx], osd_db.osd_width, osd_db.osd_height,
                                   video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
                                   video_buf_map.video_width, video_buf_map.video_height);
 
@@ -1529,13 +1582,23 @@ static void* compositor_thread(void* arg)
         if (atomic_load(&pending_commit)) {
             video_cur = video_buf_map.cur;
             drm_atomic_commit_all_buffers(ctx,
-                                          &osd_bufs[osd_db.cur], osd_db.osd_width, osd_db.osd_height,
+                                          &osd_bufs[osd_db.display_idx], osd_db.osd_width, osd_db.osd_height,
                                           video_buf_map.fb_id[video_cur], video_buf_map.dma_fd[video_cur],
                                           video_buf_map.video_width, video_buf_map.video_height);
             atomic_store(&pending_commit, 0);
         }
-        drmHandleEvent(ctx->drm_fd, &evctx);
-        usleep(5000); // Sleep for 5 ms to avoid busy-waiting new events
+        struct pollfd pfd;
+        pfd.fd = ctx->drm_fd;
+        pfd.events = POLLIN;
+
+        int poll_res = poll(&pfd, 1, -1);
+
+        // Check if we have DRM events to process
+        if (poll_res > 0 && (pfd.revents & POLLIN)) {
+            drmHandleEvent(ctx->drm_fd, &evctx);
+        } else {
+            usleep(1000); // Sleep for 1ms if no events
+        }
     }
 
     printf("[ DRM ] Compositor thread exiting\n");
