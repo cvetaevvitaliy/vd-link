@@ -73,6 +73,7 @@ set(MSP_OSD_SRC
 #        src/msp-osd/rec/rec_util.c
         src/msp-osd/toast/toast.c
         src/msp-osd/util/fs_util.c
+        src/ui/ui.c
 )
 
 add_executable(${PROJECT_NAME}

@@ -15,6 +15,7 @@
 #include "src/drm_display.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
+#include "ui/ui.h"
 
 static volatile int running = 1;
 
@@ -22,6 +23,7 @@ static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
     running = 0;
+    ui_deinit();
     msp_osd_stop();
     rtp_receiver_stop();
     drm_close();
@@ -122,6 +124,8 @@ int main(int argc, char* argv[])
     msp_osd_init(&config);
 
     rtp_receiver_start(&config);
+
+    ui_init();
 
     while (running) {
         usleep(100000); // Sleep for 100 ms
