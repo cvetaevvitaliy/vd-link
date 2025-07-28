@@ -54,6 +54,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/lvgl
         ${CMAKE_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
+        ${CMAKE_SOURCE_DIR}/include_common
 )
 
 set(MSP_OSD_SRC

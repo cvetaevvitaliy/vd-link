@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include "../log.h"
+#include "log.h"
 #include "ui_interface.h"
 
 static const char *module_name_str = "UI";
