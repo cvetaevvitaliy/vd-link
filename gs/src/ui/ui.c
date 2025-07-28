@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <time.h>
 #include "ui.h"
+#include "ui_interface.h"
 #include "drm_display.h"
 #include "msp-osd.h"
 #include "lvgl/lvgl.h"
@@ -103,14 +104,13 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
     int width = LVGL_BUFF_WIDTH;
     int height = LVGL_BUFF_HEIGHT;
 
-    rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_RGBA_8888);
-    rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_RGBA_8888);
+    rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_BGRA_8888);
+    rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_BGRA_8888);
 
     IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_SRC_OVER);
 
     if (ret != IM_STATUS_SUCCESS) {
         fprintf(stderr, "RGA: imblend failed: %d\n", ret);
-        return;
     }
 
     // Push the new squashed frame to DRM
@@ -119,8 +119,8 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
 
 void drm_osd_frame_done_cb(void)
 {
-    memset(lvgl_buf1, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
-    memset(lvgl_buf2, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
+    // memset(lvgl_buf1, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
+    // memset(lvgl_buf2, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
     lv_display_flush_ready(disp);
 }
 
@@ -157,6 +157,9 @@ int ui_init(void)
     }
 
     lv_display_set_buffers(disp, lvgl_buf1, lvgl_buf2, fb_size, LV_DISPLAY_RENDER_MODE_FULL);
+    
+    // Set color format to support alpha channel properly in LVGL 9
+    lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED);
 
     printf("[ UI ] Initialized LVGL display with size %dx%d\n", LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
 
@@ -164,17 +167,11 @@ int ui_init(void)
 
     drm_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 
-    // Create a transparent background style
-    static lv_style_t style_transp_bg;
-    lv_style_init(&style_transp_bg);
-    lv_style_set_bg_opa(&style_transp_bg, LV_OPA_TRANSP);
+    lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_0, LV_PART_MAIN);
 
-    lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
+    // init_joystick();
 
-    lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "Hello, LVGL!");
-
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    ui_interface_init(disp);
 
     return 0;
 }

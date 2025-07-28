@@ -16,6 +16,7 @@
 #include "msp-osd.h"
 #include "wfb_status_link.h"
 #include "ui/ui.h"
+#include "ui/ui_interface.h"
 
 static volatile int running = 1;
 
@@ -104,6 +105,12 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     }
 }
 
+void wfb_status_link_callback(const wfb_rx_status *st)
+{
+    ui_update_wfb_ng_telemetry(st);
+    // osd_wfb_status_link_callback(st);
+}
+
 int main(int argc, char* argv[])
 {
     struct config_t config = {
@@ -123,13 +130,17 @@ int main(int argc, char* argv[])
 
     msp_osd_init(&config);
 
-    rtp_receiver_start(&config);
-
     ui_init();
+
+    wfb_status_link_start(config.ip, config.wfb_port, wfb_status_link_callback);
+
+    rtp_receiver_start(&config);
 
     while (running) {
         usleep(100000); // Sleep for 100 ms
     }
+
+    wfb_status_link_stop();
 
     return 0;
 }
