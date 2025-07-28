@@ -24,6 +24,8 @@
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
+#include "lvgl/lvgl.h"
+#include "ui/ui.h"
 
 #define DEBUG_PRINT_LINK 0
 
@@ -40,9 +42,8 @@ static char current_fc_variant[5];
 
 #define BYTES_PER_PIXEL 4
 
-static int display_width = 0;
-static int display_height = 0;
-static int rotation = 0; // 0, 90, 180, 270
+#define OSD_WIDTH 1280
+#define OSD_HEIGHT 720
 
 static uint16_t msp_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
@@ -53,6 +54,8 @@ static volatile bool need_render = false;
 
 static void render_display(void);
 static void need_render_display(void);
+
+static void *fb_addr = NULL;
 
 static char current_fc_variant[5];
 
@@ -133,13 +136,12 @@ static void msp_clear_screen(void)
 
 static void clear_framebuffer(void)
 {
-    void *fb_addr = drm_get_next_osd_fb();
     if (fb_addr == NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
     }
     // DJI has a backwards alpha channel - FF is transparent, 00 is opaque.
-    memset(fb_addr, 0, display_width * display_height * BYTES_PER_PIXEL);
+    memset(fb_addr, 0, OSD_WIDTH * OSD_HEIGHT * BYTES_PER_PIXEL);
 }
 
 static void draw_character_map(display_info_t *display_info, void* restrict fb_addr, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
@@ -149,35 +151,12 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
         return;
     }
 
-    int fb_w = display_width;
-    int fb_h = display_height;
-    int osd_w = display_info->char_width * display_info->font_width;
-    int osd_h = display_info->char_height * display_info->font_height;
+    int fb_w = OSD_WIDTH;
+    int fb_h = OSD_HEIGHT;
     int x_offset = display_info->x_offset;
     int y_offset = display_info->y_offset;
 
     int rx_min = 0, ry_min = 0;
-
-    switch (rotation) {
-    case 0:
-        rx_min = 0;
-        ry_min = 0;
-        break;
-    case 90:
-        rx_min = fb_h - (osd_h + y_offset * 2);
-        ry_min = -x_offset;
-        break;
-    case 180:
-        rx_min = fb_w - (osd_w + x_offset * 2);
-        ry_min = fb_h - (osd_h + y_offset * 2);
-        break;
-    case 270:
-        x_offset = -x_offset;
-        y_offset = -y_offset;
-        rx_min = y_offset;
-        ry_min = fb_w - (osd_w + x_offset * 2) - (fb_h - osd_w);
-        break;
-    }
 #if 0 // Debugging rotation and offsets
     printf("rx_min=%d, ry_min=%d\n", rx_min, ry_min);
     printf("Drawing character map with rotation %d, fb_w=%d, fb_h=%d, osd_w=%d, osd_h=%d, x_offset=%d, y_offset=%d\n", rotation, fb_w, fb_h, osd_w, osd_h, x_offset, y_offset);
@@ -200,30 +179,8 @@ static void draw_character_map(display_info_t *display_info, void* restrict fb_a
                 for (uint8_t gx = 0; gx < display_info->font_width; gx++) {
                     uint32_t px = src_x + gx;
                     uint32_t py = src_y + gy;
-
-                    int rx = 0, ry = 0;
-                    switch (rotation) {
-                    case 0:
-                        rx = px - rx_min;
-                        ry = py - ry_min;
-                        break;
-                    case 90:
-                        rx = fb_h - 1 - py - rx_min;
-                        ry = px - ry_min;
-                        break;
-                    case 180:
-                        rx = fb_w - 1 - px - rx_min;
-                        ry = fb_h - 1 - py - ry_min;
-                        break;
-                    case 270:
-                        rx = py - rx_min;
-                        ry = fb_w - 1 - px - ry_min;
-                        break;
-                    default:
-                        rx = px - rx_min;
-                        ry = py - ry_min;
-                        break;
-                    }
+                    int rx = px - rx_min;
+                    int ry = py - ry_min;
 
                     if (rx < 0 || ry < 0 || rx >= fb_w || ry >= fb_h) continue;
 
@@ -244,7 +201,6 @@ static void draw_screen(void)
 {
     clear_framebuffer();
 
-    void *fb_addr = drm_get_next_osd_fb();
     if (fb_addr== NULL) {
         DEBUG_PRINT("Failed to get framebuffer address\n");
         return;
@@ -265,7 +221,6 @@ static void render_screen(void)
     if (display_mode == DISPLAY_DISABLED) {
         clear_framebuffer();
     }
-    drm_push_new_osd_frame();
     //DEBUG_PRINT("drew a frame\n");
     clock_gettime(CLOCK_MONOTONIC, &last_render);
 }
@@ -398,11 +353,12 @@ static void* msp_osd_thread(void *arg)
     struct config_t *cfg = (struct config_t *)arg;
     printf("[ MSP OSD ] Starting MSP OSD thread\n");
 
-    if (drm_get_osd_frame_size(&display_width, &display_height, &rotation) < 0) {
-        printf("[ MSP OSD ] Failed to get OSD frame size\n");
+    fb_addr = malloc(OSD_WIDTH * OSD_HEIGHT * BYTES_PER_PIXEL);
+    if (fb_addr == NULL) {
+        printf("[ MSP OSD ] Failed to allocate framebuffer memory\n");
         return NULL;
     }
-    printf("[ MSP OSD ] OSD frame size: %dx%d, rotation: %d\n", display_width, display_height, rotation);
+    printf("[ MSP OSD ] OSD frame size: %dx%d\n", OSD_WIDTH, OSD_HEIGHT);
 
     memset(current_fc_variant, 0, sizeof(current_fc_variant));
 
@@ -446,17 +402,26 @@ static void* msp_osd_thread(void *arg)
         if(need_render) {
             render_display();
         }
-        usleep(10000);
+        usleep(16000); // Simulate 60 FPS
     }
 
     wfb_status_link_stop();
 
     free(display_driver);
     free(msp_state);
+    free(fb_addr);
 
     close_all_fonts();
 
     printf("[ MSP OSD ] Stopped MSP OSD thread\n");
+
+    return NULL;
+}
+
+void *msp_osd_get_fb_addr(void)
+{
+    if (fb_addr)
+        return fb_addr;
 
     return NULL;
 }

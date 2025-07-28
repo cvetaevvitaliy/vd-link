@@ -63,6 +63,7 @@ struct drm_fb_t {
     size_t size;
 };
 
+typedef void (*drm_osd_frame_done_cb_t)(void);
 
 int drm_init(char *device, struct config_t *cfg);
 
@@ -70,11 +71,9 @@ struct drm_context_t *drm_get_ctx(void);
 
 void drm_push_new_video_frame(int dma_fd, int width, int height, int hor_stride, int ver_stride);
 
-int drm_get_osd_frame_size(int *width, int *height, int *rotate);
+void drm_set_osd_frame_done_callback(drm_osd_frame_done_cb_t cb);
 
-void drm_push_new_osd_frame(void);
-
-void *drm_get_next_osd_fb(void);
+void drm_push_new_osd_frame(const void *src_addr, int width, int height);
 
 void drm_close(void);
 

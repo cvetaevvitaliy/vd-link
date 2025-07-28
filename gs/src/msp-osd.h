@@ -10,4 +10,6 @@ int msp_osd_init(struct config_t *cfg);
 
 void msp_osd_stop(void);
 
+void *msp_osd_get_fb_addr(void);
+
 #endif //VD_LINK_MSP_OSD_H
