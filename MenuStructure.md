@@ -1,0 +1,49 @@
+## Menu structure for the VD-Link Ground Station UI
+
+Menu
+- WFB-ng settings
+	- Bitrate - dropbox [400Kbps, 800Kbps, 1.2Mbps, 2Mbps, 4Mbps, 8Mbps]
+	- Codec - dropbox [H264,H265]
+	- GOP size - dropbox [1s, 2s, 3s, 4s, 5s]
+	- Channel width - dropbox [20MHz, 40MHz]
+- Video settings
+	- Focus mode - checkbox
+	- Use NN - checkbox
+	- Mirror/Flip - dropbox [mirror,flip,mirror+flip]
+	- Enable Auto Exposure - checkbox
+	- Brightness - slider [0-100]
+	- Contrast - slider [0-100]
+	- Saturation - slider [0-100]
+	- Sharpness - slider [0-100]
+- System settings
+	- Wifi settings
+		- Connect to WiFi
+			- new screen with WiFi networks
+				- List of available networks
+				- Connect button
+				- Input for password
+				- Cancel button
+		- Paired devices - button
+			- new screen with list of paired devices
+		- Add device - button
+			- new screen with QR code
+	- Device keys mapping - button
+		- Keys mapping screen
+			- Enable NN - dropdown [list of keys]
+			- Enable focus mode - dropdown [list of keys]
+			- Show/hide status bar - dropdown [list of keys]
+			- Show/hide telemetry - dropdown [list of keys]
+	- Language - dropbox [English, Ukrainian]
+	- Reset to factory defaults - button
+		- Confirmation dialog
+			- "Are you sure you want to reset to factory defaults?" - text
+			- Yes - button
+			- No - button
+- Display settings
+	- Show CPU load and Temp of remote device - checkbox
+	- Hide status bar by default - checkbox
+	- Status bar location - dropbox [top, bottom]
+	- Show WFB-ng telemetry - checkbox
+- About
+	- Version information - text
+	- License information - text

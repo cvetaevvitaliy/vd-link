@@ -10,6 +10,7 @@
 #include "log.h"
 
 #include "input.h"
+#include "menu.h"
 
 #define USE_JOYSTICK 0
 
@@ -18,6 +19,7 @@ static const char *module_name_str = "UI INPUT";
 static int joystick_fd = -1;
 static bool joystick_running = false;
 lv_indev_t * indev = NULL;
+static lv_group_t * input_group = NULL;
 
 #if USE_JOYSTICK
 // Mouse cursor position
@@ -78,6 +80,13 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
             } else { // Button released
                 data->state = LV_INDEV_STATE_RELEASED;
             }
+#if 0
+            if (event.number < sizeof(button_names) / sizeof(button_names[0])) {
+                DEBUG("Key %s, state: %s", 
+                    button_names[event.number], 
+                    data->state == LV_INDEV_STATE_PRESSED ? "PRESSED" : "RELEASED");
+            }
+#endif
         }
     }
 }
@@ -139,6 +148,15 @@ int ui_keypad_init(void)
     indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(indev, keyboard_read);
+    
+    // Create input group for keyboard navigation
+    input_group = lv_group_create();
+    if (input_group) {
+        lv_indev_set_group(indev, input_group);
+        INFO("Input group created and assigned to keypad");
+    } else {
+        ERROR("Failed to create input group");
+    }
 #else
     indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
@@ -170,5 +188,21 @@ void ui_keypad_deinit(void)
         joystick_fd = -1;
     }
 
+    // Clean up input group
+    if (input_group) {
+        lv_group_delete(input_group);
+        input_group = NULL;
+    }
+
     INFO("Joystick handling cleaned up");
+}
+
+lv_group_t* ui_get_input_group(void)
+{
+    if (input_group) {
+        DEBUG("Returning input group: %p", input_group);
+    } else {
+        DEBUG("Input group is NULL");
+    }
+    return input_group;
 }

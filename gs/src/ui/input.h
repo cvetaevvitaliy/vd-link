@@ -22,6 +22,7 @@ typedef enum {
 
 int ui_keypad_init(void);
 void ui_keypad_deinit(void);
+lv_group_t* ui_get_input_group(void);
 
 
 #endif // GS_UI_INPUT_H
