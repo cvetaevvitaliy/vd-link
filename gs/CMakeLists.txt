@@ -90,6 +90,7 @@ set(MSP_OSD_SRC
         src/ui/fonts/montserrat_cyrillic_42.c
         src/ui/fonts/montserrat_cyrillic_48.c
         src/ui/ui.c
+        src/ui/lang/lang.c
 )
 
 add_executable(${PROJECT_NAME}
