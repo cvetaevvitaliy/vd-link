@@ -35,6 +35,10 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
 {
     struct js_event event;
 
+    // Initialize data to default state
+    data->state = LV_INDEV_STATE_RELEASED;
+    data->key = 0;
+
     ssize_t bytes = read(joystick_fd, &event, sizeof(event));
     if (bytes == sizeof(event)) {
         if (event.type == JS_EVENT_BUTTON) {
@@ -57,13 +61,20 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
                 case KEYPAD_BUTTON_B:
                     data->key = LV_KEY_ESC;
                     break;
+                case KEYPAD_BUTTON_START:
+                    data->key = LV_KEY_HOME;
+                    break;
                 default:
+                    return; // Don't process unhandled buttons
                     break;
                 }
             if (event.value == 1) { // Button pressed
                 data->state = LV_INDEV_STATE_PRESSED;
-                // Handle menu navigation
-                // menu_handle_navigation(event.number);
+                
+                // Handle menu toggle with START button
+                if (event.number == KEYPAD_BUTTON_START) {
+                    menu_toggle();
+                }
             } else { // Button released
                 data->state = LV_INDEV_STATE_RELEASED;
             }
