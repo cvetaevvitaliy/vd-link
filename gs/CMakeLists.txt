@@ -73,6 +73,22 @@ set(MSP_OSD_SRC
 #        src/msp-osd/rec/rec_util.c
         src/msp-osd/toast/toast.c
         src/msp-osd/util/fs_util.c
+        src/ui/fonts/montserrat_cyrillic_14.c
+        src/ui/fonts/montserrat_cyrillic_16.c
+        src/ui/fonts/montserrat_cyrillic_18.c
+        src/ui/fonts/montserrat_cyrillic_20.c
+        src/ui/fonts/montserrat_cyrillic_22.c
+        src/ui/fonts/montserrat_cyrillic_24.c
+        src/ui/fonts/montserrat_cyrillic_26.c
+        src/ui/fonts/montserrat_cyrillic_28.c
+        src/ui/fonts/montserrat_cyrillic_30.c
+        src/ui/fonts/montserrat_cyrillic_32.c
+        src/ui/fonts/montserrat_cyrillic_34.c
+        src/ui/fonts/montserrat_cyrillic_36.c
+        src/ui/fonts/montserrat_cyrillic_38.c
+        src/ui/fonts/montserrat_cyrillic_40.c
+        src/ui/fonts/montserrat_cyrillic_42.c
+        src/ui/fonts/montserrat_cyrillic_48.c
         src/ui/ui.c
 )
 
