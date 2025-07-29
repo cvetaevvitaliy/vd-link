@@ -29,6 +29,7 @@ static void *lvgl_buf2 = NULL;
 static lv_display_t *disp = NULL;
 static pthread_t tick_tid;
 static int tick_running = 1;
+static _Atomic int ui_init_done = 0;
 static void *fb_addr = NULL;
 
 static void *tick_thread(void *arg)
@@ -37,6 +38,10 @@ static void *tick_thread(void *arg)
     printf("[ UI ] Tick thread started\n");
     struct timespec prev, now;
     clock_gettime(CLOCK_MONOTONIC, &prev);
+
+    while (!ui_init_done) {
+        usleep(1000); // Wait until UI is initialized
+    }
 
     while (atomic_load(&tick_running)) {
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -171,11 +176,16 @@ int ui_init(void)
 
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_0, LV_PART_MAIN);
 
+    lv_disp_enable_invalidation(NULL, false);
+
     ui_keypad_init();
+
+    ui_interface_init(disp);
 
     menu_create(lv_scr_act());
 
-    ui_interface_init(disp);
+    ui_init_done = 1;
+    lv_disp_enable_invalidation(NULL, true);
 
     return 0;
 }
@@ -184,6 +194,10 @@ void ui_deinit(void)
 {
     atomic_store(&tick_running, 0);
     pthread_join(tick_tid, NULL);
+
+    menu_destroy();
+    ui_interface_deinit();
+    ui_keypad_deinit();
 
     if (lvgl_buf1)
         free(lvgl_buf1);

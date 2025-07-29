@@ -384,6 +384,7 @@ static void* rx_thread_fn(void *arg)
         close(sock);
         usleep(500000); // Wait before reconnect
     }
+    printf("[ WFB STATUS LINK ] RX thread exiting\n");
     return NULL;
 }
 

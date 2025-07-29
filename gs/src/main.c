@@ -19,10 +19,12 @@
 #include "ui/ui_interface.h"
 
 static volatile int running = 1;
+_Atomic int termination_requested = 0;
 
 static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
+    termination_requested = 1;
     running = 0;
     ui_deinit();
     msp_osd_stop();

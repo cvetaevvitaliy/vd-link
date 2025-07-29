@@ -5,6 +5,7 @@
 #include "log.h"
 #include "ui_interface.h"
 
+extern _Atomic int termination_requested;
 static const char *module_name_str = "UI";
 
 static lv_obj_t *signal_strength;
@@ -22,7 +23,7 @@ lv_color_t color_ht_accent = LV_COLOR_MAKE(0x5B, 0x9F, 0xFF);
 
 void ui_update_wfb_ng_telemetry(const wfb_rx_status *st)
 {
-    if (!st) return;
+    if (!st || termination_requested) return;
 
     if (st->id[0] != 'v') return; // id could be "video rx", "msposd rx", "mavlink rx". We need only "video rx" telemetry
     
