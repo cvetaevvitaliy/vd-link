@@ -171,7 +171,7 @@ int ui_init(void)
     lv_style_set_bg_opa(&style_transp_bg, LV_OPA_TRANSP);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED);
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_TRANSP, LV_PART_MAIN);
-
+    lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_20, LV_STYLE_STATE_CMP_SAME);
     lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
 
     lv_obj_t *black_square = lv_obj_create(lv_scr_act());
@@ -181,7 +181,7 @@ int ui_init(void)
     lv_obj_set_style_bg_opa(black_square, LV_OPA_50, LV_PART_MAIN);
 
     lv_obj_t *label = lv_label_create(black_square);
-    lv_label_set_text(label, "Hello, LVGL!");
+    lv_label_set_text(label, "Привіт, LVGL!");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *red_square = lv_obj_create(lv_scr_act());
