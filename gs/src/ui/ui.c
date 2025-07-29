@@ -10,6 +10,7 @@
 #include "ui.h"
 #include "drm_display.h"
 #include "msp-osd.h"
+#include "lang/lang.h"
 #include "lvgl/lvgl.h"
 #include <rga/im2d_buffer.h>
 #include <rga/im2d_single.h>
@@ -165,6 +166,8 @@ int ui_init(void)
 
     drm_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 
+    lang_set_english();
+
     // Create a transparent background style
     static lv_style_t style_transp_bg;
     lv_style_init(&style_transp_bg);
@@ -181,7 +184,7 @@ int ui_init(void)
     lv_obj_set_style_bg_opa(black_square, LV_OPA_50, LV_PART_MAIN);
 
     lv_obj_t *label = lv_label_create(black_square);
-    lv_label_set_text(label, "Привіт, LVGL!");
+    lv_label_set_text(label,  lang_get_str(STR_HELLO));
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *red_square = lv_obj_create(lv_scr_act());
