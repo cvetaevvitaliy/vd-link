@@ -21,23 +21,16 @@ lv_color_t color_ht_main = LV_COLOR_MAKE(0x12, 0x14, 0x1A);
 lv_color_t color_ht_secondary = LV_COLOR_MAKE(0x28, 0x2A, 0x31);
 lv_color_t color_ht_accent = LV_COLOR_MAKE(0x5B, 0x9F, 0xFF);
 
+static float last_bitrate_mbps = 0.0f;
+static float last_signal_strength = 0.0f;
+
 void ui_update_wfb_ng_telemetry(const wfb_rx_status *st)
 {
     if (!st || termination_requested) return;
 
     if (st->id[0] != 'v') return; // id could be "video rx", "msposd rx", "mavlink rx". We need only "video rx" telemetry
-    
-    // Update bitrate
-    if (bitrate) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%s %.2f Mbps", LV_SYMBOL_WIFI, st->ants[0].bitrate_mbps);
-        lv_label_set_text(bitrate, buf);
-    }
-    
-    // Update RSSI
-    if (signal_strength) {
-        lv_label_set_text_fmt(signal_strength, "/ %ddBm", st->ants[0].rssi_avg);
-    }
+    last_bitrate_mbps = st->ants[0].bitrate_mbps;
+    last_signal_strength = st->ants[0].rssi_avg;
 }
 
 static void update_battery_charge(lv_timer_t *t)
@@ -90,6 +83,21 @@ static void update_battery_charge(lv_timer_t *t)
 
     // Force full area refresh for left side elements
     // lv_obj_invalidate(lv_obj_get_parent(battery_charge));
+}
+
+static void update_signal_strength(lv_timer_t *t)
+{
+    // Update bitrate
+    if (bitrate) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%s %.2f Mbps", LV_SYMBOL_WIFI, last_bitrate_mbps);
+        lv_label_set_text(bitrate, buf);
+    }
+    
+    // Update RSSI
+    if (signal_strength) {
+        lv_label_set_text_fmt(signal_strength, "/ %ddBm", last_signal_strength);
+    }
 }
 
 /**
@@ -146,6 +154,10 @@ int ui_interface_init(lv_display_t *disp)
     lv_obj_set_style_text_color(bitrate, color_ht_accent, LV_PART_MAIN);
     lv_obj_set_style_text_font(bitrate, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(bitrate, lv_color_white(), LV_PART_MAIN);
+    lv_timer_t *signal_timer = lv_timer_create(update_signal_strength, 1000, NULL);
+    if (signal_timer == NULL) {
+        ERROR("Failed to create signal strength timer");
+    }
 
 
     clock_l = lv_label_create(top_bar);
