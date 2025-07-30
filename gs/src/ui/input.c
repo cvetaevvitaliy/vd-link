@@ -150,13 +150,13 @@ int ui_keypad_init(void)
     lv_indev_set_read_cb(indev, keyboard_read);
     
     // Create input group for keyboard navigation
-    input_group = lv_group_create();
-    if (input_group) {
-        lv_indev_set_group(indev, input_group);
-        INFO("Input group created and assigned to keypad");
-    } else {
-        ERROR("Failed to create input group");
-    }
+    // input_group = lv_group_create();
+    // if (input_group) {
+    //     lv_indev_set_group(indev, input_group);
+    //     INFO("Input group created and assigned to keypad");
+    // } else {
+    //     ERROR("Failed to create input group");
+    // }
 #else
     indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
@@ -188,11 +188,7 @@ void ui_keypad_deinit(void)
         joystick_fd = -1;
     }
 
-    // Clean up input group
-    if (input_group) {
-        lv_group_delete(input_group);
-        input_group = NULL;
-    }
+    // Input group will be deleted by menu_destroy()
 
     INFO("Joystick handling cleaned up");
 }
@@ -205,4 +201,13 @@ lv_group_t* ui_get_input_group(void)
         DEBUG("Input group is NULL");
     }
     return input_group;
+}
+
+void ui_set_input_group(lv_group_t *group)
+{
+    input_group = group;
+    if (indev) {
+        lv_indev_set_group(indev, group);
+    }
+    DEBUG("Input group set to: %p", group);
 }

@@ -47,5 +47,6 @@ void menu_hide(void);
 // System integration functions
 void menu_set_item_callbacks(lv_obj_t *item, menu_item_callbacks_t *callbacks);
 void menu_reload_system_values(void);
+lv_group_t* menu_get_current_group(void);
 
 #endif // GS_UI_MENU_H

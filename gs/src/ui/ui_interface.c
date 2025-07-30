@@ -96,7 +96,7 @@ static void update_signal_strength(lv_timer_t *t)
     
     // Update RSSI
     if (signal_strength) {
-        lv_label_set_text_fmt(signal_strength, "/ %ddBm", last_signal_strength);
+        lv_label_set_text_fmt(signal_strength, "/ %ddBm", (int)last_signal_strength);
     }
 }
 

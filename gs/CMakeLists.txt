@@ -14,7 +14,7 @@ endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 # LVGL configuration
-set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src" CACHE STRING "Path to lv_conf.h dir" FORCE)
+set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/ui" CACHE STRING "Path to lv_conf.h dir" FORCE)
 
 # disable LVGL examples and demos
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "Disable LVGL examples" FORCE)
@@ -54,7 +54,9 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/lvgl
         ${CMAKE_SOURCE_DIR}/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/include_common
+        ${CMAKE_SOURCE_DIR}/ui
 )
 
 set(MSP_OSD_SRC
@@ -78,6 +80,8 @@ set(MSP_OSD_SRC
         src/ui/ui_interface.c
         src/ui/menu.c
         src/ui/input.c
+        src/ui/menu_wifi_settings.c
+        src/ui/callbacks.c
 )
 
 add_executable(${PROJECT_NAME}

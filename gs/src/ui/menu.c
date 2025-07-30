@@ -3,6 +3,7 @@
 #include "input.h"
 #include <malloc.h>
 #include <string.h>
+#include "callbacks.h"
 
 #define MAX_GRID_ROWS 3
 #define MAX_GRID_COLS 3
@@ -35,12 +36,11 @@ extern lv_color_t color_ht_main;
 extern lv_color_t color_ht_secondary;
 extern lv_color_t color_ht_accent;
 
-extern lv_indev_t* indev;
-
 // Menu objects
 static lv_obj_t *menu;
 static menu_section_ctx_t menu_tabs[MENU_PAGE_COUNT]; // 5 tabs: WFB NG, Video, System, Display, About
 static menu_section_e current_section = MENU_PAGE_WFB_NG;
+static lv_group_t* tabview_group = NULL;
 bool menu_visible = false;
 
 // Edit mode tracking
@@ -85,8 +85,13 @@ void menu_show(void)
         return;
     }
 
+    if (!tabview_group) {
+        ERROR("Tabview group not created - call menu_create() first");
+        return;
+    }
     lv_obj_clear_flag(menu, LV_OBJ_FLAG_HIDDEN);
     menu_visible = true;
+    ui_set_input_group(tabview_group);
     INFO("Menu shown");
 }
 
@@ -106,9 +111,14 @@ void menu_create(lv_obj_t *parent)
 {
     menu = lv_tabview_create(parent);
     lv_obj_add_event_cb(menu, tab_view_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_set_style_bg_opa(menu, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_radius(menu, 20, 0);
     
     lv_obj_set_size(menu, 960, 520);
     lv_obj_center(menu);
+
+    tabview_group = lv_group_create();
+    
 
     // Configure menu appearance
     lv_color_t bg_color = lv_obj_get_style_bg_color(menu, 0);
@@ -125,32 +135,39 @@ void menu_create(lv_obj_t *parent)
     lv_obj_t* tab_btns = lv_tabview_get_tab_btns(menu);
     if (tab_btns) {
         lv_obj_set_style_text_font(tab_btns, &lv_font_montserrat_24, 0);
-        lv_group_add_obj(ui_get_input_group(), tab_btns);
+        lv_group_add_obj(tabview_group, tab_btns);
         lv_obj_add_event_cb(tab_btns, tab_view_event_handler, LV_EVENT_KEY, NULL);
         lv_obj_add_flag(tab_btns, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(tab_btns, LV_OBJ_FLAG_CLICK_FOCUSABLE);
     }
 
-    menu_visible = true;
+    menu_show();
     INFO("Complex menu created");
 }
 
 void menu_destroy(void)
 {
     if (menu) {
-        lv_group_t *input_group = ui_get_input_group();
-        if (input_group) {
-            lv_group_remove_obj(menu);
-        }
-
         lv_obj_del(menu);
         menu = NULL;
         
         for (int i = 0; i < MENU_PAGE_COUNT; i++) {
+            if (menu_tabs[i].input_group) {
+                lv_group_del(menu_tabs[i].input_group);
+                menu_tabs[i].input_group = NULL;
+            }
             free(menu_tabs[i].col_dsc);
             free(menu_tabs[i].row_dsc);
+            menu_tabs[i].col_dsc = NULL;
+            menu_tabs[i].row_dsc = NULL;
+        }
+        
+        if (tabview_group) {
+            lv_group_del(tabview_group);
+            tabview_group = NULL;
         }
     }
+    menu_visible = false;
 }
 
 void focus_event_cb(lv_event_t *e) {
@@ -207,6 +224,26 @@ static void enter_edit_mode(lv_obj_t *cell)
             interactive_child = child;
             edit_obj = child; // Set the actual interactive element as edit_obj
             break;
+        }
+
+        // If it is a button, we can handle it already
+        if ( lv_obj_check_type(child, &lv_button_class))
+        {
+            menu_section_ctx_t *active_section = get_active_menu_section();
+            menu_item_callbacks_t *callbacks = NULL;
+            // Find the cell position and get callbacks
+            for (int row = 0; row < active_section->max_rows; row++) {
+                for (int col = 0; col < active_section->max_cols; col++) {
+                    if (active_section->cells[row][col] == edit_cell) {
+                        callbacks = &active_section->cell_callbacks[row][col];
+                        break;
+                    }
+                }
+                if (callbacks) break;
+            }
+            if (callbacks->type == MENU_ITEM_TYPE_BUTTON && callbacks->callbacks.button.action) {
+                callbacks->callbacks.button.action();
+            }
         }
     }
     
@@ -520,14 +557,14 @@ static void focus_to_tabview()
     lv_obj_t* tab_btns = lv_tabview_get_tab_btns(menu);
     if (tab_btns) {
         // Switch to the main UI input group for tabview navigation
-        lv_indev_set_group(indev, ui_get_input_group());
+        ui_set_input_group(tabview_group);
 
         // Focus on the tab buttons
         lv_group_focus_obj(tab_btns);
-        DEBUG("Focused on tab buttons: %p, group: %p", tab_btns, ui_get_input_group());
+        DEBUG("Focused on tab buttons: %p, group: %p", tab_btns, tabview_group);
 
         // Debug: check if tab_btns is actually in the group
-        lv_group_t* group = ui_get_input_group();
+        lv_group_t* group = tabview_group;
         int count = lv_group_get_obj_count(group);
         DEBUG("Main group has %d objects", count);
         for (int i = 0; i < count; i++) {
@@ -683,6 +720,12 @@ static void create_menu_pages(void)
     /* System settings tab*/
     item = create_button_item(system_tab, "WiFi settings", "Wifi settings");
     add_object_to_section(MENU_PAGE_SYSTEM, item);
+    menu_set_item_callbacks(item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_BUTTON,
+        .callbacks.button = {
+            .action = wifi_settings_click_handler // Define this handler in your system code
+        }
+    });
 
     item = create_button_item(system_tab, "Device keys mapping", "Change mapping");
     add_object_to_section(MENU_PAGE_SYSTEM, item);
@@ -763,12 +806,14 @@ static void keypad_event_handler(lv_event_t *e)
     menu_section_ctx_t *active_section = get_active_menu_section();
 
     lv_group_t * cur_group = active_section->input_group;
+#if 0
     int count = lv_group_get_obj_count(cur_group);
     DEBUG("Current group count: %d", count);
     for (int i = 0; i < count; i++) {
         lv_obj_t *obj_p = lv_group_get_obj_by_index(cur_group, i);
         DEBUG("Object in group: %p", obj_p);
     }
+#endif
     int next_row = active_section->current_row;
     int next_col = active_section->current_col;
 
@@ -957,7 +1002,7 @@ static void tab_view_event_handler(lv_event_t* event)
         menu_section_ctx_t *active_section = &menu_tabs[curr_tab_id];
         if (active_section && active_section->input_group) {
             current_section = curr_tab_id;
-            lv_indev_set_group(indev, active_section->input_group);
+            ui_set_input_group(active_section->input_group);
             focus_btn(0, 0);
             DEBUG("Switched to tab content, section: %d", curr_tab_id);
         }
@@ -998,7 +1043,8 @@ static lv_obj_t* create_grid_cell(lv_obj_t *parent, const char* title)
     lv_obj_set_height(cell, 120);
     lv_obj_set_style_pad_all(cell, 4, 0);
     lv_obj_set_style_margin_all(cell, 2, 0);
-    
+    lv_obj_set_style_bg_opa(cell, LV_OPA_10, LV_PART_MAIN);
+
     lv_obj_set_layout(cell, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1006,7 +1052,10 @@ static lv_obj_t* create_grid_cell(lv_obj_t *parent, const char* title)
     if (title) {
         lv_obj_t *label = lv_label_create(cell);
         lv_label_set_text(label, title);
+        lv_obj_set_width(label, LV_PCT(90));
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     }
 
     lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
@@ -1058,6 +1107,7 @@ static lv_obj_t *create_button_item(lv_obj_t *parent, const char *txt, const cha
 
     lv_obj_t *btn = lv_btn_create(obj);
     lv_obj_set_size(btn, LV_PCT(100), 50);
+    lv_obj_set_style_text_font(btn, &lv_font_montserrat_24, 0);
     lv_obj_add_event_cb(btn, menu_item_click_handler, LV_EVENT_CLICKED, NULL);
     
     if (btn_txt) {
@@ -1075,8 +1125,18 @@ static lv_obj_t *create_dropdown_item(lv_obj_t *parent, const char *txt, const c
 
     lv_obj_t *dropdown = lv_dropdown_create(obj);
     lv_dropdown_set_options(dropdown, options);
+    lv_obj_set_style_text_font(dropdown, &lv_font_montserrat_24, 0);
     lv_dropdown_set_selected(dropdown, 0);
     lv_obj_set_width(dropdown, LV_PCT(90));
 
     return obj;
+}
+
+lv_group_t* menu_get_current_group(void)
+{
+    menu_section_ctx_t *active_section = get_active_menu_section();
+    if (active_section) {
+        return active_section->input_group;
+    }
+    return NULL;
 }
