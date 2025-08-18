@@ -17,13 +17,18 @@
 #include "wfb_status_link.h"
 #include "ui/ui.h"
 #include "ui/ui_interface.h"
+#include "link.h"
+#include "log.h"
+#include "msp-osd/msp/msp.h"
+#include "device_type.h"
 
+static const char *module_name_str = "MAIN";
 static volatile int running = 1;
 _Atomic int termination_requested = 0;
 
 static void signal_handler(int sig)
 {
-    printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
+    INFO("\nCaught signal %d, exit ...", sig);
     termination_requested = 1;
     running = 0;
     ui_deinit();
@@ -86,7 +91,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
         case 'p': {
             int port = atoi(optarg);
             if (port < 1 || port > 65535 || config->wfb_port == port) {
-                fprintf(stderr, "Invalid port number: %s\n", optarg);
+                ERROR("Invalid port number: %s", optarg);
                 exit(EXIT_FAILURE);
             }
             config->port = port;
@@ -94,7 +99,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
         case 'w': {
             int port = atoi(optarg);
             if (port < 1 || port > 65535 || config->port == port) {
-                fprintf(stderr, "Invalid WFB port number: %s\n", optarg);
+                ERROR("Invalid WFB port number: %s", optarg);
                 exit(EXIT_FAILURE);
             }
             config->wfb_port = port;
@@ -113,8 +118,45 @@ void wfb_status_link_callback(const wfb_rx_status *st)
     // osd_wfb_status_link_callback(st);
 }
 
+void update_displayport_cb(const char *data, size_t size)
+{
+    if (size == 0 || data == NULL) {
+        ERROR("Received empty displayport data");
+        return;
+    }
+
+    // Forward the displayport data to the UI
+    // DEBUG("Received displayport data of size %zu bytes", size);
+    msp_process_data_pack((const uint8_t*)data, size);
+    //ui_update_displayport(data, size);
+}
+
+void update_sys_telemetry(float cpu_temp, float cpu_usage)
+{
+    // Update the UI with system telemetry data
+    // DEBUG("CPU Temperature: %.2f °C, CPU Usage: %.2f%%", cpu_temp, cpu_usage);
+    ui_update_system_telemetry(cpu_temp, cpu_usage);
+}
+
+void update_detection_results(const link_detection_box_t* results, size_t count)
+{
+    if (count == 0 || results == NULL) {
+        ERROR("Received empty detection results");
+        return;
+    }
+
+    // Update the UI with detection results
+    INFO("Received %zu detection results", count);
+    // ui_update_detection(results, count);
+}
+
 int main(int argc, char* argv[])
 {
+    if (get_device_type() == DEVICE_TYPE_UNKNOWN) {
+        ERROR("Unknown device type, exiting...");
+        return EXIT_FAILURE;
+    }
+
     struct config_t config = {
         .ip = "0.0.0.0",
         .port = 5602,
@@ -137,6 +179,11 @@ int main(int argc, char* argv[])
     wfb_status_link_start(config.ip, config.wfb_port, wfb_status_link_callback);
 
     rtp_receiver_start(&config);
+
+    link_init(LINK_GROUND_STATION);
+    link_register_displayport_rx_cb(update_displayport_cb);
+    link_register_sys_telemetry_rx_cb(update_sys_telemetry);
+    link_register_detection_rx_cb(update_detection_results);
 
     while (running) {
         usleep(100000); // Sleep for 100 ms

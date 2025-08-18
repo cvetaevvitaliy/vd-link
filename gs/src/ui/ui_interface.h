@@ -42,6 +42,13 @@ void lvgl_create_menu();
 void ui_update_wfb_ng_telemetry(const wfb_rx_status *st);
 
 /**
+ * Update the UI with system telemetry data
+ * @param cpu_temp Current CPU temperature in Celsius
+ * @param cpu_usage Current CPU usage percentage
+ */
+void ui_update_system_telemetry(float cpu_temp, float cpu_usage);
+
+/**
  * Show a notification message on the UI
  * @param text The notification text to display
  * @param timeout Duration in milliseconds to show the notification

@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-#define ENABLE_DEBUG 0
+#define ENABLE_DEBUG 1
 
 #define LOG(level, module, x, ...) \
     do { printf("["level"][%s]: " x "\n", module, ##__VA_ARGS__); } while (0)

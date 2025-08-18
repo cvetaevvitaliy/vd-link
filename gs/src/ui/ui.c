@@ -17,6 +17,7 @@
 #include <rga/rga.h>
 #include "menu.h"
 #include "input.h"
+#include "device_type.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -114,7 +115,7 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
     rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_BGRA_8888);
     rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_BGRA_8888);
 
-    IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_SRC_OVER);
+    IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_DST_OVER);
 
     if (ret != IM_STATUS_SUCCESS) {
         fprintf(stderr, "RGA: imblend failed: %d\n", ret);
@@ -178,11 +179,15 @@ int ui_init(void)
 
     lv_disp_enable_invalidation(NULL, false);
 
-    ui_keypad_init();
+    if (is_keyboard_supported()) {
+        ui_keypad_init();
+    }
 
     ui_interface_init(disp);
 
-    menu_create(lv_scr_act());
+    if (is_keyboard_supported()) {
+        menu_create(lv_scr_act());
+    }
 
     ui_init_done = 1;
     lv_disp_enable_invalidation(NULL, true);

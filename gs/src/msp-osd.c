@@ -32,6 +32,7 @@ static pthread_t msp_thread;
 static atomic_int running = 0;
 
 static char current_fc_variant[5];
+msp_state_t *msp_state;
 
 #define SPLASH_STRING "OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
@@ -373,7 +374,7 @@ static void* msp_osd_thread(void *arg)
     display_driver->draw_complete = &msp_draw_complete;
     display_driver->set_options = &msp_set_options;
 
-    msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
+    msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
 
     load_fonts("btfl");

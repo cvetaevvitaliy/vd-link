@@ -83,7 +83,7 @@ static int link_process_incoming_data(const char* data, size_t size)
             break;
         case PKT_SYS_TELEMETRY:
             // Handle system telemetry
-            DEBUG("Received system telemetry");
+            // DEBUG("Received system telemetry");
             link_sys_telemetry_pkt_t* telemetry_pkt = (link_sys_telemetry_pkt_t*)data;
             if (link_callbacks.sys_telemetry_cb) {
                 link_callbacks.sys_telemetry_cb(telemetry_pkt->cpu_temperature, telemetry_pkt->cpu_usage_percent);
@@ -102,7 +102,7 @@ static int link_process_incoming_data(const char* data, size_t size)
             break;
         case PKT_MSP_DISPLAYPORT:
             // Handle displayport data
-            DEBUG("Received displayport data");
+            // DEBUG("Received displayport data");
             link_msp_displayport_pkt_t* displayport_pkt = (link_msp_displayport_pkt_t*)data;
             if (link_callbacks.displayport_cb) {
                 link_callbacks.displayport_cb(displayport_pkt->data, displayport_pkt->header.size);
@@ -250,7 +250,6 @@ int link_send_sys_telemetry(float cpu_temp, float cpu_usage)
 
 int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, const void* data, size_t size)
 {
-    uint32_t pkt_id = rand() % 1000; // Generate a random packet ID for this command
     if (data == NULL && size != 0) {
         ERROR("No data to send for command");
         return -1;
@@ -258,7 +257,7 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
 
     link_command_pkt_t cmd_pkt;
     cmd_pkt.header.type = PKT_CMD;
-    cmd_pkt.header.size = size + sizeof(link_command_pkt_t) - sizeof(link_packet_header_t);
+    cmd_pkt.header.size = size + sizeof(link_command_pkt_t) - sizeof(link_packet_header_t) - sizeof(cmd_pkt.data);
     cmd_pkt.cmd_id = cmd_id;
     cmd_pkt.subcmd_id = subcmd_id;
     cmd_pkt.size = size;
@@ -274,8 +273,7 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
         PERROR("Failed to send command packet");
         return -1;
     }
-
-    pkt_id++; // Increment packet ID for next command
+    DEBUG("Sent command packet: cmd_id=%d, subcmd_id=%d, size=%zu", cmd_id, subcmd_id, sent);
 
     return 0;
 }

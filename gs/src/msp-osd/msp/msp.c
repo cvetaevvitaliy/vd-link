@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "msp.h"
 
+extern msp_state_t *msp_state;
 uint16_t msp_data_from_msg(uint8_t message_buffer[], msp_msg_t *msg) {
     // return size
     construct_msp_command(message_buffer, msg->cmd, msg->payload, msg->size, msg->direction);
@@ -123,6 +124,19 @@ msp_error_e msp_process_data(msp_state_t *msp_state, uint8_t dat)
                 return MSP_ERR_CKS;
             }
             break;
+    }
+    return MSP_ERR_NONE;
+}
+
+msp_error_e msp_process_data_pack(const uint8_t* dat, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+    {
+        msp_error_e err = msp_process_data(msp_state, dat[i]);
+        if (err != MSP_ERR_NONE)
+        {
+            return err;
+        }
     }
     return MSP_ERR_NONE;
 }

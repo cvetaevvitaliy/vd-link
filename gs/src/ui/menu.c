@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <string.h>
 #include "callbacks.h"
+#include "link.h"
 
 #define MAX_GRID_ROWS 3
 #define MAX_GRID_COLS 3
@@ -141,7 +142,7 @@ void menu_create(lv_obj_t *parent)
         lv_obj_clear_flag(tab_btns, LV_OBJ_FLAG_CLICK_FOCUSABLE);
     }
 
-    menu_show();
+    menu_hide();
     INFO("Complex menu created");
 }
 
@@ -665,6 +666,12 @@ static void add_object_to_section(menu_section_e section, lv_obj_t *obj)
     }
 }
 
+void set_detection_handler(bool state)
+{
+    // This function should be defined in your system code to handle detection state changes
+    int value = state ? 1 : 0;
+    link_send_cmd(LINK_CMD_SET, LINK_SUBCMD_DETECTION, &value, sizeof(value));
+}
 
 // Create all menu pages and structure
 static void create_menu_pages(void)
@@ -688,6 +695,17 @@ static void create_menu_pages(void)
     add_object_to_section(MENU_PAGE_WFB_NG, item);
     // TODO: Add GOP callbacks when system functions are available
 
+    wfb_ng_get_frequencies();
+    item = create_dropdown_item(wfb_ng_tab, "Frequency", wfb_ng_get_frequencies_str());
+    add_object_to_section(MENU_PAGE_WFB_NG, item);
+    menu_set_item_callbacks(item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_DROPDOWN,
+        .callbacks.dropdown = {
+            .get = wfb_ng_get_current_frequency,
+            .set = wfb_ng_set_frequency
+        }
+    });
+
     item = create_dropdown_item(wfb_ng_tab, "Channel width", "20MHz\n40MHz");
     add_object_to_section(MENU_PAGE_WFB_NG, item);
 
@@ -698,6 +716,13 @@ static void create_menu_pages(void)
 
     item = create_switch_item(video_tab, "Use detection", false);
     add_object_to_section(MENU_PAGE_VIDEO, item);
+    menu_set_item_callbacks(item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_SWITCH,
+        .callbacks.switch_cb = {
+            .get = NULL, // Define this handler in your system code
+            .set = set_detection_handler
+        }
+    });
 
     item = create_dropdown_item(video_tab, "Mirror/Flip", "None\nMirror\nFlip\nMirror+Flip");
     add_object_to_section(MENU_PAGE_VIDEO, item);

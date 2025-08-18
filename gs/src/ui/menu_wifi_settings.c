@@ -1,3 +1,4 @@
+#include "menu_wifi_settings.h"
 #include "menu.h"
 #include "log.h"
 #include "input.h"
@@ -9,7 +10,7 @@ lv_obj_t *menu_wifi_settings = NULL;
 lv_group_t *wifi_settings_group = NULL;
 lv_group_t *current_menu_group = NULL;
 
-void hide_menu_wifi_settings(void);
+
 
 // Key event handler for WiFi settings navigation
 static void wifi_settings_key_handler(lv_event_t *e)
@@ -73,7 +74,7 @@ void back_btn_click_handler(lv_event_t *e)
     
     // Hide the WiFi settings menu
     ui_set_input_group(current_menu_group);
-    hide_menu_wifi_settings();
+    hide_menu_wifi_settings(NULL);
     
     // Optionally, you can return to the previous menu or screen
     DEBUG("Back button clicked in WiFi settings menu");
@@ -214,7 +215,7 @@ lv_obj_t *show_menu_wifi_settings(lv_obj_t *parent)
     return menu_wifi_settings;
 }
 
-void hide_menu_wifi_settings(void)
+void hide_menu_wifi_settings(void* arg)
 {
     DEBUG("Hiding WiFi settings menu");
     

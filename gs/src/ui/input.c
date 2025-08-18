@@ -133,11 +133,17 @@ void mouse_read(lv_indev_t * indev, lv_indev_data_t * data)
  */
 int ui_keypad_init(void)
 {
+    int attempts = 0;
     while (joystick_fd < 0) {
         // Try to open joystick
         joystick_fd = open("/dev/input/js0", O_RDONLY | O_NONBLOCK);
         if (joystick_fd < 0) {
             usleep(1000000); // Wait 1 second before retry
+            attempts++;
+            if (attempts >= 5) {
+                ERROR("Failed to open joystick after 5 attempts");
+                return -1; // Give up after 5 attempts
+            }
             continue;
         }
         INFO("Connected to /dev/input/js0");

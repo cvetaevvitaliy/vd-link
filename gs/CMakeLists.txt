@@ -82,6 +82,7 @@ set(MSP_OSD_SRC
         src/ui/input.c
         src/ui/menu_wifi_settings.c
         src/ui/callbacks.c
+        src/device_type.c
 )
 
 add_executable(${PROJECT_NAME}
@@ -94,7 +95,7 @@ add_executable(${PROJECT_NAME}
         src/wfb_status_link.c
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl
+target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl link
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}
