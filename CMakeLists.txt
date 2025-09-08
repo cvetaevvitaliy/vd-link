@@ -3,6 +3,7 @@ project(vd-link)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/librtp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/link)
+add_subdirectory(${CMAKE_SOURCE_DIR}/pidfile)
 
 # Set target platform: "gs" (default) or "drone"
 set(PLATFORM "gs" CACHE STRING "Target platform: gs or drone")

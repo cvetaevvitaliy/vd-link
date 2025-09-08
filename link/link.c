@@ -82,32 +82,38 @@ static int link_process_incoming_data(const char* data, size_t size)
             }
             break;
         case PKT_SYS_TELEMETRY:
-            // Handle system telemetry
-            // DEBUG("Received system telemetry");
-            link_sys_telemetry_pkt_t* telemetry_pkt = (link_sys_telemetry_pkt_t*)data;
-            if (link_callbacks.sys_telemetry_cb) {
-                link_callbacks.sys_telemetry_cb(telemetry_pkt->cpu_temperature, telemetry_pkt->cpu_usage_percent);
-            } else {
-                ERROR("No system telemetry callback registered");
+            {
+                // Handle system telemetry
+                // DEBUG("Received system telemetry");
+                link_sys_telemetry_pkt_t* telemetry_pkt = (link_sys_telemetry_pkt_t*)data;
+                if (link_callbacks.sys_telemetry_cb) {
+                    link_callbacks.sys_telemetry_cb(telemetry_pkt->cpu_temperature, telemetry_pkt->cpu_usage_percent);
+                } else {
+                    ERROR("No system telemetry callback registered");
+                }
             }
             break;
         case PKT_CMD:
-            DEBUG("Received command packet");
-            link_command_pkt_t* cmd_pkt = (link_command_pkt_t*)data;
-            if (link_callbacks.cmd_cb) {
-                link_callbacks.cmd_cb(cmd_pkt->cmd_id,  cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
-            } else {
-                ERROR("No command callback registered");
+            {
+                DEBUG("Received command packet");
+                link_command_pkt_t* cmd_pkt = (link_command_pkt_t*)data;
+                if (link_callbacks.cmd_cb) {
+                    link_callbacks.cmd_cb(cmd_pkt->cmd_id,  cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
+                } else {
+                    ERROR("No command callback registered");
+                }
             }
             break;
         case PKT_MSP_DISPLAYPORT:
-            // Handle displayport data
-            // DEBUG("Received displayport data");
-            link_msp_displayport_pkt_t* displayport_pkt = (link_msp_displayport_pkt_t*)data;
-            if (link_callbacks.displayport_cb) {
-                link_callbacks.displayport_cb(displayport_pkt->data, displayport_pkt->header.size);
-            } else {
-                ERROR("No displayport callback registered");
+            {
+                // Handle displayport data
+                // DEBUG("Received displayport data");
+                link_msp_displayport_pkt_t* displayport_pkt = (link_msp_displayport_pkt_t*)data;
+                if (link_callbacks.displayport_cb) {
+                    link_callbacks.displayport_cb(displayport_pkt->data, displayport_pkt->header.size);
+                } else {
+                    ERROR("No displayport callback registered");
+                }
             }
             break;
         default:
