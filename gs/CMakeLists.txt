@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8...3.13)
-project(vd-link C)
+project(vd-link-gs C)
 
 set(CMAKE_C_FLAGS_DEBUG "-O1 -g3")
 set(CMAKE_C_FLAGS_RELEASE "-O2")
