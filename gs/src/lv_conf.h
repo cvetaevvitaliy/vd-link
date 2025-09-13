@@ -135,7 +135,7 @@
  * Requirements:
  * - `LV_USE_MATRIX = 1`.
  * - Rendering engine needs to support 3x3 matrix transformations. */
-#define LV_DRAW_TRANSFORM_USE_MATRIX            0
+#define LV_DRAW_TRANSFORM_USE_MATRIX            1
 
 /* If a widget has `style_opa < 255` (not `bg_opa`, `text_opa` etc) or not NORMAL blend mode
  * it is buffered into a "simple" layer before rendering. The widget can be buffered in smaller chunks.
@@ -143,7 +143,7 @@
  * and can't be drawn in chunks. */
 
 /** The target buffer size for simple layer chunks. */
-#define LV_DRAW_LAYER_SIMPLE_BUF_SIZE    (24 * 1024)    /**< [bytes]*/
+#define LV_DRAW_LAYER_SIMPLE_BUF_SIZE    (128 * 1024)    /**< [bytes]*/
 
 /* Limit the max allocated memory for simple and transformed layers.
  * It should be at least `LV_DRAW_LAYER_SIMPLE_BUF_SIZE` sized but if transformed layers are also used
@@ -154,7 +154,7 @@
 /** Stack size of drawing thread.
  * NOTE: If FreeType or ThorVG is enabled, it is recommended to set it to 32KB or more.
  */
-#define LV_DRAW_THREAD_STACK_SIZE    (8 * 1024)         /**< [bytes]*/
+#define LV_DRAW_THREAD_STACK_SIZE    (256 * 1024)         /**< [bytes]*/
 
 /** Thread priority of the drawing task.
  *  Higher values mean higher priority.
@@ -209,7 +209,7 @@
         /** Allow buffering some shadow calculation.
          *  LV_DRAW_SW_SHADOW_CACHE_SIZE is the maximum shadow size to buffer, where shadow size is
          *  `shadow_width + radius`.  Caching has LV_DRAW_SW_SHADOW_CACHE_SIZE^2 RAM cost. */
-        #define LV_DRAW_SW_SHADOW_CACHE_SIZE 0
+        #define LV_DRAW_SW_SHADOW_CACHE_SIZE 32
 
         /** Set number of maximally-cached circle data.
          *  The circumference of 1/4 circle are saved for anti-aliasing.
@@ -566,11 +566,11 @@
 #define LV_ATTRIBUTE_EXTERN_DATA
 
 /** Use `float` as `lv_value_precise_t` */
-#define LV_USE_FLOAT            0
+#define LV_USE_FLOAT            1
 
 /** Enable matrix support
  *  - Requires `LV_USE_FLOAT = 1` */
-#define LV_USE_MATRIX           0
+#define LV_USE_MATRIX           1
 
 /** Include `lvgl_private.h` in `lvgl.h` to access internal data and functions by default */
 #ifndef LV_USE_PRIVATE_API
@@ -849,9 +849,9 @@
 #endif
 
 /** API for open, read, etc. */
-#define LV_USE_FS_POSIX 0
+#define LV_USE_FS_POSIX 1
 #if LV_USE_FS_POSIX
-    #define LV_FS_POSIX_LETTER '\0'     /**< Set an upper-case driver-identifier letter for this driver (e.g. 'A'). */
+    #define LV_FS_POSIX_LETTER 'A'     /**< Set an upper-case driver-identifier letter for this driver (e.g. 'A'). */
     #define LV_FS_POSIX_PATH ""         /**< Set the working directory. File/directory paths will be appended to it. */
     #define LV_FS_POSIX_CACHE_SIZE 0    /**< >0 to cache this number of bytes in lv_fs_read() */
 #endif
@@ -937,10 +937,10 @@
 #define LV_USE_RLE 0
 
 /** QR code library */
-#define LV_USE_QRCODE 0
+#define LV_USE_QRCODE 1
 
 /** Barcode code library */
-#define LV_USE_BARCODE 0
+#define LV_USE_BARCODE 1
 
 /** FreeType library */
 #define LV_USE_FREETYPE 0
@@ -966,10 +966,10 @@
 
 /** Enable Vector Graphic APIs
  *  - Requires `LV_USE_MATRIX = 1` */
-#define LV_USE_VECTOR_GRAPHIC  0
+#define LV_USE_VECTOR_GRAPHIC  1
 
 /** Enable ThorVG (vector graphics library) from the src/libs folder */
-#define LV_USE_THORVG_INTERNAL 0
+#define LV_USE_THORVG_INTERNAL 1
 
 /** Enable ThorVG by assuming that its installed and linked to the project */
 #define LV_USE_THORVG_EXTERNAL 0
@@ -983,7 +983,7 @@
 /*SVG library
  *  - Requires `LV_USE_VECTOR_GRAPHIC = 1` */
 #define LV_USE_SVG 0
-#define LV_USE_SVG_ANIMATION 0
+#define LV_USE_SVG_ANIMATION 9
 #define LV_USE_SVG_DEBUG 0
 
 /** FFmpeg library for image decoding and playing videos.
@@ -1095,7 +1095,7 @@
 #define LV_USE_MONKEY 0
 
 /** 1: Enable grid navigation */
-#define LV_USE_GRIDNAV 0
+#define LV_USE_GRIDNAV 1
 
 /** 1: Enable `lv_obj` fragment logic */
 #define LV_USE_FRAGMENT 0
@@ -1126,7 +1126,7 @@
 
 /** 1: Enable file explorer.
  *  - Requires: lv_table */
-#define LV_USE_FILE_EXPLORER                     0
+#define LV_USE_FILE_EXPLORER                     1
 #if LV_USE_FILE_EXPLORER
     /** Maximum length of path */
     #define LV_FILE_EXPLORER_PATH_MAX_LEN        (128)
