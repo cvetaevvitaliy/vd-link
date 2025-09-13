@@ -104,7 +104,10 @@ include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/isp
-        ${CMAKE_SOURCE_DIR}/librtp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/uart
+        ${CMAKE_CURRENT_SOURCE_DIR}/msp-osd
+        ${CMAKE_SOURCE_DIR}/lib/librtp/include
+        ${CMAKE_SOURCE_DIR}/lib/msp/src
 )
 
 
@@ -115,6 +118,8 @@ add_executable(${PROJECT_NAME}
         src/camera_csi.c
         src/camera_usb.c
         src/rtp_streamer.c
+        src/uart/uart.c
+        src/msp-osd/msp_osd.c
 )
 
 target_link_libraries(${PROJECT_NAME}
