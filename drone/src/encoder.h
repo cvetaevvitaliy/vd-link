@@ -11,12 +11,6 @@
 typedef void (*encoder_callback)(void *data, int size, uint32_t timestamp);
 
 typedef enum {
-    CODEC_UNKNOWN = 0,
-    CODEC_H264,
-    CODEC_H265
-} codec_type_t;
-
-typedef enum {
     RATE_CONTROL_CBR = 0,
     RATE_CONTROL_VBR,
     RATE_CONTROL_AVBR,
