@@ -118,6 +118,7 @@ target_link_libraries(${PROJECT_NAME}
         pthread
         m
         rtp
+        msp
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )
