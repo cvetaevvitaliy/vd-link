@@ -103,13 +103,18 @@ endif()
 include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/isp
         ${CMAKE_SOURCE_DIR}/librtp/include
 )
 
 
 add_executable(${PROJECT_NAME}
+        src/isp/sample_common_isp.c
         src/main.c
         src/encoder.c
+        src/camera_csi.c
+        src/camera_usb.c
+        src/rtp_streamer.c
 )
 
 target_link_libraries(${PROJECT_NAME}
