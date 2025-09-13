@@ -6,6 +6,7 @@
 #define VRX_COMMON_H
 #include <stdint.h>
 #include <stdbool.h>
+#include "../../version.h"
 
 typedef enum {
     CODEC_UNKNOWN = 0,

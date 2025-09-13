@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8...3.13)
-project(vd-link C)
+project(vd-link-${PLATFORM} C)
 
 if (CMAKE_SYSROOT) # already defined
     message(STATUS "CMAKE_SYSROOT already defined: ${CMAKE_SYSROOT}")

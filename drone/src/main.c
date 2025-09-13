@@ -51,7 +51,7 @@ static void print_banner(void)
             " ╚██╗ ██╔╝██║  ██║╚════╝██║     ██║██║╚██╗██║██╔═██╗ \n"
             "  ╚████╔╝ ██████╔╝      ███████╗██║██║ ╚████║██║  ██╗\n"
             "   ╚═══╝  ╚═════╝       ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝\n"
-            "%s\nVersion: %s\nBuild from: %s\nGit hash: %s\n\n", PLATFORM, GIT_TAG, GIT_BRANCH, GIT_HASH
+            "Version: %s\nBuild from: %s\nGit hash: %s\n\n", GIT_TAG, GIT_BRANCH, GIT_HASH
     );
 }
 
