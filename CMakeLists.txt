@@ -60,7 +60,8 @@ endif()
 
 project(vd-link)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/librtp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
 
 # Set target platform: "gs" (default) or "drone"
 set(PLATFORM "gs" CACHE STRING "Target platform: gs or drone")

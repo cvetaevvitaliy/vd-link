@@ -52,7 +52,7 @@ include_directories(${PROJECT_NAME}
         ${ROCKCHIPMPP_INCLUDE_DIRS}
         ${MSGPACK_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/lvgl
-        ${CMAKE_SOURCE_DIR}/librtp/include
+        ${CMAKE_SOURCE_DIR}/lib/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
 )
 
