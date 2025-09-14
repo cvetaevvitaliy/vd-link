@@ -21,6 +21,8 @@ https://github.com/benhoyt/inih
 
 #include "ini.h"
 
+#include <errno.h>
+
 #if !INI_USE_STACK
 #if INI_CUSTOM_ALLOCATOR
 #include <stddef.h>
@@ -275,8 +277,10 @@ int ini_parse(const char* filename, ini_handler handler, void* user)
     int error;
 
     file = fopen(filename, "r");
-    if (!file)
+    if (!file) {
+        fprintf(stderr, "Error opening %s: %s\n", filename, strerror(errno));
         return -1;
+    }
     error = ini_parse_file(file, handler, user);
     fclose(file);
     return error;
