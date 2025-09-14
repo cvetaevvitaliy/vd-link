@@ -2,11 +2,10 @@
 /**
  * Copyright (C) 2025 Vitaliy N <vitaliy.nimych@gmail.com>
  */
+#include "encoder/encoder.h"
 #include <stdio.h>
 #include <easymedia/rkmedia_api.h>
 #include <easymedia/rkmedia_venc.h>
-#include "encoder.h"
-
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

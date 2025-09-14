@@ -2,7 +2,7 @@
 /**
  * Copyright (C) 2025 Vitaliy N <vitaliy.nimych@gmail.com>
  */
-#include "rtp_streamer.h"
+#include "rtp_streamer/rtp_streamer.h"
 #include <rtp-payload.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,8 +64,9 @@ static int rtp_socket_open(const char* ip, int port)
     return 0;
 }
 
-int rtp_streamer_init(rtp_streamer_config_t *cfg)
+int rtp_streamer_init(struct common_config_t *cfg)
 {
+    int ret = 0;
     rtp_packet_setsize(DEFAULT_FRAME_SIZE);
 
     struct rtp_payload_t handler = {0};
@@ -76,13 +77,19 @@ int rtp_streamer_init(rtp_streamer_config_t *cfg)
     uint16_t seq = (uint16_t)(rand() & 0xFFFF);  // random start sequence
     uint32_t ssrc = (uint32_t)rand();            // random SSRC
 
-    encoder = rtp_payload_encode_create(RTP_PAYLOAD_TYPE_DYNAMIC, cfg->codec, seq, ssrc, &handler, &out_socket);
+    encoder = rtp_payload_encode_create(RTP_PAYLOAD_TYPE_DYNAMIC, cfg->encoder_config.codec == CODEC_H264 ? "H264" : "H265", seq, ssrc, &handler, &out_socket);
     if (!encoder) {
         printf("RTP encoder creation failed\n");
         return -1;
     }
 
-    rtp_socket_open(cfg->ip, cfg->port);
+    ret = rtp_socket_open(cfg->rtp_streamer_config.ip, cfg->rtp_streamer_config.port);
+    if (ret < 0) {
+        printf("RTP socket open failed\n");
+        rtp_payload_encode_destroy(encoder);
+        encoder = NULL;
+        return -1;
+    }
 
     return 0;
 }
@@ -93,7 +100,7 @@ int rtp_streamer_push_frame(void *data, int size, uint32_t timestamp)
         return -1;
     }
 
-    return rtp_payload_encode_input(encoder, data, (int)size, timestamp);
+    return rtp_payload_encode_input(encoder, data, size, timestamp);
 }
 
 void rtp_streamer_deinit(void)

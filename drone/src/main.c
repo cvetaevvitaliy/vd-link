@@ -11,7 +11,10 @@
 #include <unistd.h>
 #include <getopt.h>
 #include "common.h"
-#include "encoder.h"
+#include "encoder/encoder.h"
+#include "config/config_parser.h"
+
+#define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 
 static volatile bool running = false;
 
@@ -57,7 +60,7 @@ static void print_banner(void)
     );
 }
 
-static void parse_args(int argc, char* argv[], struct config_t* config)
+static void parse_args(int argc, char* argv[], struct common_config_t* config)
 {
     static struct option long_options[] = {
         {"ip", required_argument, 0, 'i'},
@@ -71,7 +74,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     while ((opt = getopt_long(argc, argv, "i:p:c:h", long_options, NULL)) != -1) {
         switch (opt) {
         case 'i':
-            config->ip = optarg;
+            config->rtp_streamer_config.ip = optarg;
             break;
         case 'p': {
             int port = atoi(optarg);
@@ -79,13 +82,13 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
                 fprintf(stderr, "Invalid port number: %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
-            config->port = port;
+            config->rtp_streamer_config.port = port;
         } break;
         case 'c': {
-            if (strcmp(optarg, "h264") == 0) {
-                config->codec_type = CODEC_H264;
-            } else if (strcmp(optarg, "h265") == 0) {
-                config->codec_type = CODEC_H265;
+            if (strcmp(optarg, "h264") == 0 || strcmp(optarg, "H264") == 0) {
+                config->encoder_config.codec = CODEC_H264;
+            } else if (strcmp(optarg, "h265") == 0 || strcmp(optarg, "H265") == 0) {
+                config->encoder_config.codec = CODEC_H265;
             } else {
                 fprintf(stderr, "Unsupported codec type: %s\n", optarg);
                 print_usage(argv[0]);
@@ -100,45 +103,26 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     }
 }
 
-static void update_config_encoder(struct config_t *config, encoder_config_t *enc_cfg)
-{
-    if (!config || !enc_cfg) {
-        return;
-    }
-    enc_cfg->codec = config->codec_type;
-    enc_cfg->rate_mode = RATE_CONTROL_AVBR;
-    enc_cfg->width = config->stream_width;
-    enc_cfg->height = config->stream_height;
-    enc_cfg->bitrate = config->stream_bitrate;
-    enc_cfg->fps = 60;
-    enc_cfg->gop = 60; // 2 seconds GOP
-    enc_cfg->osd_config.width = 200;
-    enc_cfg->osd_config.height = 50;
-    enc_cfg->osd_config.pos_x = 10;
-    enc_cfg->osd_config.pos_y = 10;
-    enc_cfg->encoder_focus_mode.focus_quality = -8; // Quality adjustment for focus area
-    enc_cfg->encoder_focus_mode.frame_size = 65;    // Focus on center 65% of frame
-}
-
 int main(int argc, char *argv[])
 {
-    encoder_config_t encoder_config = {0};
-
-    struct config_t config = {
-        .ip = "0.0.0.0",
-        .port = 5602,
-        .codec_type = CODEC_H265,
+    struct common_config_t config = {
+        .rtp_streamer_config.ip = "0.0.0.0",
+        .rtp_streamer_config.port = 5602,
+        .encoder_config.codec = CODEC_H265,
     };
+
+    if (ini_parse(PATH_TO_CONFIG_FILE, config_parser_handler, &config) < 0) {
+        printf("Can't load '%s'\n" PATH_TO_CONFIG_FILE);
+    }
 
     print_banner();
     parse_args(argc, argv, &config);
     setup_signals();
 
-    update_config_encoder(&config, &encoder_config);
-
     printf("Configuration:\n");
-    printf(" ip: %s\n", config.ip);
-    printf(" port: %d\n", config.port);
+    printf(" ip: %s\n", config.rtp_streamer_config.ip);
+    printf(" port: %d\n", config.rtp_streamer_config.port);
+    printf(" codec: %s\n", config.encoder_config.codec == CODEC_H264 ? "H.264" : "H.265");
 
     running = true;
 

@@ -2,4 +2,4 @@
 /**
  * Copyright (C) 2025 Vitaliy N <vitaliy.nimych@gmail.com>
  */
-#include "camera_usb.h"
+#include "camera/camera_usb.h"

@@ -103,23 +103,23 @@ endif()
 include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/isp
-        ${CMAKE_CURRENT_SOURCE_DIR}/uart
-        ${CMAKE_CURRENT_SOURCE_DIR}/msp-osd
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/lib/librtp/include
         ${CMAKE_SOURCE_DIR}/lib/msp/src
+        ${CMAKE_SOURCE_DIR}/lib/ini/src
 )
 
 
 add_executable(${PROJECT_NAME}
-        src/isp/sample_common_isp.c
+        src/camera/isp/sample_common_isp.c
         src/main.c
-        src/encoder.c
-        src/camera_csi.c
-        src/camera_usb.c
-        src/rtp_streamer.c
+        src/encoder/encoder.c
+        src/camera/camera_csi.c
+        src/camera/camera_usb.c
+        src/rtp_streamer/rtp_streamer.c
         src/uart/uart.c
         src/msp-osd/msp_osd.c
+        src/config/config_parser.c
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -129,6 +129,7 @@ target_link_libraries(${PROJECT_NAME}
         m
         rtp
         msp
+        ini
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )

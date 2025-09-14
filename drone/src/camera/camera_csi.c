@@ -2,8 +2,8 @@
 /**
  * Copyright (C) 2025 Vitaliy N <vitaliy.nimych@gmail.com>
  */
-#include "camera_csi.h"
-#include "isp/sample_common.h"
+#include "camera/camera_csi.h"
+#include "camera/isp/sample_common.h"
 
 #include <easymedia/rkmedia_api.h>
 
