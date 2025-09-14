@@ -2,11 +2,10 @@
 /**
  * Copyright (C) 2025 Vitaliy N <vitaliy.nimych@gmail.com>
  */
+#include "encoder/encoder.h"
 #include <stdio.h>
 #include <easymedia/rkmedia_api.h>
 #include <easymedia/rkmedia_venc.h>
-#include "encoder.h"
-
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,7 +57,7 @@ static void video_packet_cb(MEDIA_BUFFER mb)
         break;
     }
 #endif
-    enc_callback(data, size, rtp_timestamp);
+    enc_callback(data, (int)size, rtp_timestamp);
 
     RK_MPI_MB_ReleaseBuffer(mb);
 
