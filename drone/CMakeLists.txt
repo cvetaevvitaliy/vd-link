@@ -140,3 +140,8 @@ target_link_libraries(${PROJECT_NAME}
 
 # Install to /usr/local/bin/
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+
+# Install /etc/vd-link.config from assets
+install(FILES ${CMAKE_SOURCE_DIR}/assets/vd-link.config
+        DESTINATION /etc
+        PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
