@@ -142,6 +142,10 @@ target_link_libraries(${PROJECT_NAME}
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 
 # Install /etc/vd-link.config from assets
-install(FILES ${CMAKE_SOURCE_DIR}/drone/assets/vd-link.config
-        DESTINATION /etc
-        PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
+if(CMAKE_INSTALL_PREFIX STREQUAL "/usr" OR CMAKE_INSTALL_PREFIX STREQUAL "/")
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/vd-link.config DESTINATION /etc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
+else()
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/vd-link.config DESTINATION etc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
+endif()
