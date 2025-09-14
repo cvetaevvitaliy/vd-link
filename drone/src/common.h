@@ -7,6 +7,7 @@
 #include "../../version.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef void (*encoder_callback)(void *data, int size, uint32_t timestamp);
 
@@ -22,6 +23,12 @@ typedef enum {
     RATE_CONTROL_AVBR,
     RATE_CONTROL_FIXQP
 } rate_control_mode_t;
+
+typedef struct {
+    const char *name;
+    int width;
+    int height;
+} resolution_preset_t;
 
 typedef struct {
     int width;
