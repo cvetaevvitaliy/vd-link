@@ -105,24 +105,49 @@ static void parse_args(int argc, char* argv[], struct common_config_t* config)
 
 int main(int argc, char *argv[])
 {
-    struct common_config_t config = {
-        .rtp_streamer_config.ip = "0.0.0.0",
-        .rtp_streamer_config.port = 5602,
-        .encoder_config.codec = CODEC_H265,
-    };
+    struct common_config_t config = {0}; // common configuration
 
-    if (ini_parse(PATH_TO_CONFIG_FILE, config_parser_handler, &config) < 0) {
-        printf("Can't load '%s'\n" PATH_TO_CONFIG_FILE);
+    // set defaults configs
+    config_init_defaults(&config);
+
+    // Try to load config from file
+    if (config_load(PATH_TO_CONFIG_FILE, &config) != 0) {
+        printf("Can't load '%s' config file\n", PATH_TO_CONFIG_FILE);
     }
 
     print_banner();
+
+    // override config with command line args
     parse_args(argc, argv, &config);
     setup_signals();
 
     printf("Configuration:\n");
+    printf("RTP Streamer:\n");
     printf(" ip: %s\n", config.rtp_streamer_config.ip);
     printf(" port: %d\n", config.rtp_streamer_config.port);
+    printf("Encoder:\n");
     printf(" codec: %s\n", config.encoder_config.codec == CODEC_H264 ? "H.264" : "H.265");
+    printf(" resolution: %dx%d\n", config.encoder_config.width, config.encoder_config.height);
+    printf(" bitrate: %d\n", config.encoder_config.bitrate);
+    printf(" fps: %d\n", config.encoder_config.fps);
+    printf(" gop: %d\n", config.encoder_config.gop);
+    printf(" osd: %dx%d @ (%d,%d)\n", config.encoder_config.osd_config.width,
+           config.encoder_config.osd_config.height,
+           config.encoder_config.osd_config.pos_x,
+           config.encoder_config.osd_config.pos_y);
+    printf(" focus mode: %s\n", config.encoder_config.encoder_focus_mode.focus_quality >= 0 ? "ON" : "OFF");
+    printf(" focus quality: %d\n", config.encoder_config.encoder_focus_mode.focus_quality);
+    printf(" focus frame size: %d%%\n", config.encoder_config.encoder_focus_mode.frame_size);
+    printf("Camera ID: %d\n", config.camera_csi_config.cam_id);
+    printf(" Auto White Balance: %s\n", config.camera_csi_config.auto_white_balance ? "ON" : "OFF");
+    printf(" Brightness: %d\n", config.camera_csi_config.brightness);
+    printf(" Contrast: %d\n", config.camera_csi_config.contrast);
+    printf(" Saturation: %d\n", config.camera_csi_config.saturation);
+    printf(" Sharpness: %d\n", config.camera_csi_config.sharpness);
+    printf(" Flip: %s\n", config.camera_csi_config.flip ? "ON" : "OFF");
+    printf(" Mirror: %s\n", config.camera_csi_config.mirror ? "ON" : "OFF");
+    printf("\n");
+
 
     running = true;
 
