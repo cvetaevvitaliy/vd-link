@@ -120,6 +120,7 @@ add_executable(${PROJECT_NAME}
         src/uart/uart.c
         src/msp-osd/msp_osd.c
         src/config/config_parser.c
+        src/screensaver/screensaver.c
 )
 
 target_link_libraries(${PROJECT_NAME}

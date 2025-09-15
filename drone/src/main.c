@@ -13,6 +13,8 @@
 #include "common.h"
 #include "encoder/encoder.h"
 #include "config/config_parser.h"
+#include "rtp_streamer/rtp_streamer.h"
+#include "screensaver/screensaver.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 
@@ -105,7 +107,9 @@ static void parse_args(int argc, char* argv[], struct common_config_t* config)
 
 int main(int argc, char *argv[])
 {
+    int ret = 0;
     struct common_config_t config = {0}; // common configuration
+    screensaver_nv12_t screensaver; // screensaver frame (if camera not available)
 
     // set defaults configs
     config_init_defaults(&config);
@@ -148,12 +152,42 @@ int main(int argc, char *argv[])
     printf(" Mirror: %s\n", config.camera_csi_config.mirror ? "ON" : "OFF");
     printf("\n");
 
+    config.encoder_config.callback = rtp_streamer_push_frame; // register callback for encoded frames
+
+    ret = rtp_streamer_init(&config);
+    if (ret != 0) {
+        printf("Failed to initialize RTP streamer\n");
+        config_cleanup(&config);
+        return -1;
+    }
+
+    ret = encoder_init(&config.encoder_config);
+    if (ret != 0) {
+        printf("Failed to initialize encoder\n");
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
+
+    if (screensaver_create_nv12_solid(config.stream_width, config.stream_height,
+                                  0x10 /*Y black*/, 0x80 /*U*/, 0x80 /*V*/,
+                                  &screensaver) != 0) {
+        printf("Failed to create screensaver frame\n");
+        encoder_clean();
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
 
     running = true;
-
     while (running) {
-        usleep(250 * 1000);
+        encoder_manual_push_frame(&config.encoder_config, screensaver.data, (int)screensaver.size_bytes);
+        usleep(16 * 1000);
     }
+
+    encoder_clean();
+    rtp_streamer_deinit();
+    config_cleanup(&config);
 
     return 0;
 }

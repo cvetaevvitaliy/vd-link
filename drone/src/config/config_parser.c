@@ -32,7 +32,7 @@
 
 #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
 
-static const resolution_preset_t RESOLUTIONS[] = {
+const resolution_preset_t RESOLUTIONS[] = {
     { "FullHD", 1920, 1080 },
     { "HD",     1280,  720 },
     { "qHD",     960,  540 },
@@ -40,7 +40,7 @@ static const resolution_preset_t RESOLUTIONS[] = {
     { "XGA",    1024,  768 },
     { "VGA",     640,  480 },
 };
-#define NUM_RESOLUTIONS (sizeof(RESOLUTIONS)/sizeof(RESOLUTIONS[0]))\
+#define NUM_RESOLUTIONS (sizeof(RESOLUTIONS)/sizeof(RESOLUTIONS[0]))
 
 int config_parser_dumper(void* user, const char* section, const char* name, const char* value)
 {

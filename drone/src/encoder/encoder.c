@@ -9,10 +9,28 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <stdint.h>
 
 #define RTP_CLOCK_RATE 90000
 
 static encoder_callback enc_callback;
+
+static inline uint64_t monotonic_time_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
+}
+
+static inline uint32_t align_down(uint32_t v, uint32_t a)
+{
+    return v & ~(a - 1u);
+}
+
+static inline uint32_t clampu32(uint32_t v, uint32_t lo, uint32_t hi)
+{
+    return (v < lo) ? lo : (v > hi) ? hi : v;
+}
 
 static void video_packet_cb(MEDIA_BUFFER mb)
 {
@@ -63,33 +81,75 @@ static void video_packet_cb(MEDIA_BUFFER mb)
 
 }
 
-static int init_overlay_region(int venc_chn, int region_id, encoder_osd_config_t *osd_cfg)
+static int init_overlay_region(int venc_chn, int region_id, encoder_config_t *enc_cfg)
 {
-    if (osd_cfg == NULL) { return -1; }
+    if (!enc_cfg) return -1;
 
-    RK_MPI_VENC_RGN_Init(0, NULL);
-    OSD_REGION_INFO_S RgnInfo = {0};
+    // Align to 16 as required by RKMEDIA
+    uint32_t w = align_down((uint32_t)enc_cfg->osd_config.width, 16);
+    uint32_t h = align_down((uint32_t)enc_cfg->osd_config.height, 16);
+    uint32_t x = align_down((uint32_t)enc_cfg->osd_config.pos_x, 16);
+    uint32_t y = align_down((uint32_t)enc_cfg->osd_config.pos_y, 16);
+
+    // Guard against zero after alignment
+    if (w == 0 || h == 0) {
+        fprintf(stderr, "%s: width/height become zero after 16-align -> disabling OSD\n", __FUNCTION__);
+        return 0; // treat as "disabled", not a hard error
+    }
+
+    // Clamp so that the region fits inside the frame
+    const uint32_t fw = (uint32_t)enc_cfg->width;
+    const uint32_t fh = (uint32_t)enc_cfg->height;
+    if (w > fw) w = align_down(fw, 16);
+    if (h > fh) h = align_down(fh, 16);
+
+    if (x + w > fw) x = align_down((fw > w) ? (fw - w) : 0u, 16);
+    if (y + h > fh) y = align_down((fh > h) ? (fh - h) : 0u, 16);
+
+    enc_cfg->osd_config.width  = (int)w;
+    enc_cfg->osd_config.height = (int)h;
+    enc_cfg->osd_config.pos_x  = (int)x;
+    enc_cfg->osd_config.pos_y  = (int)y;
+
+    // Optional: log the adjustment
+    fprintf(stderr, "%s: aligned/clamped to <x=%u, y=%u, w=%u, h=%u>\n", __FUNCTION__, x, y, w, h);
+
+    // Init OSD system for this VENC channel
+    int ret = RK_MPI_VENC_RGN_Init(venc_chn, NULL);
+    if (ret) {
+        fprintf(stderr, "%s: RGN_Init failed: %d\n", __FUNCTION__, ret);
+        return -1;
+    }
+
+    OSD_REGION_INFO_S RgnInfo;
+    memset(&RgnInfo, 0, sizeof(RgnInfo));
     RgnInfo.enRegionId = region_id;
-    RgnInfo.u32Width = osd_cfg->width;
-    RgnInfo.u32Height = osd_cfg->height;
-    RgnInfo.u32PosX = osd_cfg->pos_x;
-    RgnInfo.u32PosY = osd_cfg->pos_y;
-    RgnInfo.u8Enable = 1;
-    RgnInfo.u8Inverse = 0;
+    RgnInfo.u32Width   = w;
+    RgnInfo.u32Height  = h;
+    RgnInfo.u32PosX    = x;
+    RgnInfo.u32PosY    = y;
+    RgnInfo.u8Enable   = 1;
+    RgnInfo.u8Inverse  = 0;
 
-    // Initialize VENC region system if not already
-    RK_MPI_VENC_RGN_Init(venc_chn, NULL);
+    // Prepare an empty ARGB8888 bitmap
+    BITMAP_S bmp;
+    memset(&bmp, 0, sizeof(bmp));
+    bmp.enPixelFormat = PIXEL_FORMAT_ARGB_8888;
+    bmp.u32Width  = w;
+    bmp.u32Height = h;
+    bmp.pData = calloc((size_t)w * (size_t)h, 4);
+    if (!bmp.pData) {
+        fprintf(stderr, "%s: OOM for bitmap %ux%u\n", __FUNCTION__, w, h);
+        return -1;
+    }
 
-    // Start with an empty BitMap
-    BITMAP_S dummy = {0};
-    dummy.enPixelFormat = PIXEL_FORMAT_ARGB_8888;
-    dummy.u32Width = osd_cfg->width;
-    dummy.u32Height = osd_cfg->height;
-    dummy.pData = calloc(osd_cfg->width * osd_cfg->height, 4);  // ARGB8888 = 4 bytes per pixel
-
-    int ret = RK_MPI_VENC_RGN_SetBitMap(venc_chn, &RgnInfo, &dummy);
-    free(dummy.pData);
-    return ret;
+    ret = RK_MPI_VENC_RGN_SetBitMap(venc_chn, &RgnInfo, &bmp);
+    free(bmp.pData);
+    if (ret) {
+        fprintf(stderr, "%s: SetBitMap failed: %d\n", __FUNCTION__, ret);
+        return -1;
+    }
+    return 0;
 }
 
 int encoder_init(encoder_config_t *cfg)
@@ -104,16 +164,11 @@ int encoder_init(encoder_config_t *cfg)
         fprintf(stderr, "Encoder config or callback is NULL\n");
         return -1;
     }
-    printf("Starting video encoder with resolution %dx%d, bitrate %d bps\n", cfg->width, cfg->height, cfg->bitrate);
+    printf("%sStarting video encoder with resolution %dx%d, bitrate %d bps\n", __FUNCTION__,
+        cfg->width, cfg->height, cfg->bitrate);
     stEncChn.enModId = RK_ID_VENC;
     stEncChn.s32DevId = 0;
     stEncChn.s32ChnId = 0;
-    ret = RK_MPI_SYS_RegisterOutCb(&stEncChn, video_packet_cb);
-    enc_callback = cfg->callback;
-    if (ret) {
-        printf("ERROR: failed to register output callback for VENC[0]! ret=%d\n", ret);
-        return -1;
-    }
 
     switch (cfg->codec) {
     case CODEC_H264: {
@@ -210,6 +265,19 @@ int encoder_init(encoder_config_t *cfg)
     venc_chn_attr.stGopAttr.s32ViQpDelta = 0; // No additional QP adjustment for video input
     venc_chn_attr.stGopAttr.u32BgInterval = 0; // No background refresh
 
+    ret = RK_MPI_VENC_CreateChn(0, &venc_chn_attr);
+    if (ret) {
+        printf("ERROR: failed to create VENC[0]! ret=%d\n", ret);
+        return -1;
+    }
+
+    ret = RK_MPI_SYS_RegisterOutCb(&stEncChn, video_packet_cb);
+    enc_callback = cfg->callback;
+    if (ret) {
+        printf("ERROR: failed to register output callback for VENC[0]! ret=%d\n", ret);
+        return -1;
+    }
+
     // Get current rate control parameters
     RK_MPI_VENC_GetRcParam(0, &rc_param);
     // Initial QP for the first frame
@@ -247,7 +315,24 @@ int encoder_init(encoder_config_t *cfg)
 
     RK_MPI_VENC_SetSuperFrameStrategy(0, &superFrmCfg);
 
-    if (init_overlay_region(0, REGION_ID_0, &cfg->osd_config) < 0) {;
+    RK_MPI_SYS_SetMediaBufferDepth(RK_ID_VENC, 0, 8); // Set VENC channel buffer depth to 8 frames
+
+    VENC_RECV_PIC_PARAM_S recv_param = { .s32RecvPicNum = -1 };
+    ret = RK_MPI_VENC_StartRecvFrame(0, &recv_param);
+    if (ret) {
+        fprintf(stderr, "ERROR: VENC_StartRecvFrame failed! ret=%d\n", ret);
+        RK_MPI_VENC_DestroyChn(0);
+        return -1;
+    }
+
+    ret = RK_MPI_SYS_StartGetMediaBuffer(RK_ID_VENC, 0);
+    if (ret) {
+        fprintf(stderr, "ERROR: SYS_StartGetMediaBuffer failed! ret=%d\n", ret);
+        RK_MPI_VENC_DestroyChn(0);
+        return -1;
+    }
+
+    if (init_overlay_region(0, REGION_ID_0, cfg) < 0) {;
         printf("Failed to initialize OSD region\n");
         return -1;
     }
@@ -277,7 +362,7 @@ void encoder_focus_mode(encoder_config_t *cfg)
 
     int ret = RK_MPI_VENC_SetRoiAttr(0, roi_attr, 1);
     if (ret != 0) {
-        printf("Failed to set ROI for focus mode: %d\n", ret);
+        printf("%s:Failed to set ROI for focus mode: %d\n", __FUNCTION__, ret);
         return;
     }
 
@@ -285,10 +370,115 @@ void encoder_focus_mode(encoder_config_t *cfg)
            roi_attr[0].stRect.u32Width, roi_attr[0].stRect.u32Height);
 }
 
-void encoder_deinit(void)
+int encoder_manual_push_frame(encoder_config_t *cfg, void *data, int size)
+{
+    if (!cfg || !data || size <= 0) {
+        fprintf(stderr, "%s: bad args\n", __FUNCTION__);
+        return -1;
+    }
+
+    const uint32_t w = (uint32_t)cfg->width;
+    const uint32_t h = (uint32_t)cfg->height;
+    if (w == 0 || h == 0) {
+        fprintf(stderr, "%s: invalid WxH\n", __FUNCTION__);
+        return -1;
+    }
+
+    // Tightly packed NV12 payload size
+    const int expected = (int)((uint64_t)w * h * 3ull / 2ull);
+    if (size != expected) {
+        fprintf(stderr,
+                "%s: size mismatch (got %d, expect %d for NV12 %ux%u)\n",
+                __FUNCTION__, size, expected, w, h);
+        return -1;
+    }
+
+    // Strides must match what VENC expects; per твої логи — рівно width/height.
+    MB_IMAGE_INFO_S info;
+    info.u32Width     = w;
+    info.u32Height    = h;
+    info.u32HorStride = w;  // no alignment
+    info.u32VerStride = h;  // no alignment
+    info.enImgType    = IMAGE_TYPE_NV12;
+
+    MEDIA_BUFFER mb = RK_MPI_MB_CreateImageBuffer(&info, RK_TRUE /*hardware*/,MB_FLAG_NOCACHED);
+    if (!mb) {
+        fprintf(stderr, "%s: CreateImageBuffer failed\n", __FUNCTION__);
+        return -1;
+    }
+
+    uint8_t *dst = (uint8_t *)RK_MPI_MB_GetPtr(mb);
+    if (!dst) {
+        fprintf(stderr, "%s: MB ptr is NULL\n", __FUNCTION__);
+        RK_MPI_MB_ReleaseBuffer(mb);
+        return -1;
+    }
+
+    memcpy(dst, data, size);
+    RK_MPI_MB_SetSize(mb, size);
+    RK_MPI_MB_SetTimestamp(mb, monotonic_time_us());
+
+    int ret = RK_MPI_SYS_SendMediaBuffer(RK_ID_VENC, 0, mb);
+    if (ret != 0) {
+        fprintf(stderr, "%s: SendMediaBuffer failed: %d\n", __FUNCTION__, ret);
+        RK_MPI_MB_ReleaseBuffer(mb);
+        return -1;
+    }
+
+    RK_MPI_MB_ReleaseBuffer(mb);
+
+    return 0;
+}
+
+int encoder_draw_overlay_buffer(const encoder_osd_config_t *cfg, const void *data, size_t size)
+{
+    if (!cfg || !data) {
+        fprintf(stderr, "%s: null args\n", __FUNCTION__);
+        return -1;
+    }
+
+    // 16-align as required by RKMEDIA
+    uint32_t w = align_down((uint32_t)cfg->width,  16);
+    uint32_t h = align_down((uint32_t)cfg->height, 16);
+    uint32_t x = align_down((uint32_t)cfg->pos_x,  16);
+    uint32_t y = align_down((uint32_t)cfg->pos_y,  16);
+
+    if (w == 0 || h == 0) {
+        return 0;
+    }
+
+    // OSD Region info
+    OSD_REGION_INFO_S rgn;
+    memset(&rgn, 0, sizeof(rgn));
+    rgn.enRegionId = REGION_ID_0;
+    rgn.u32Width   = w;
+    rgn.u32Height  = h;
+    rgn.u32PosX    = x;
+    rgn.u32PosY    = y;
+    rgn.u8Enable   = 1;
+    rgn.u8Inverse  = 0;
+
+    // Bitmap descriptor (points to caller's memory)
+    BITMAP_S bmp = {0};
+    bmp.enPixelFormat = PIXEL_FORMAT_ARGB_8888;
+    bmp.u32Width = w;
+    bmp.u32Height = h;
+    bmp.pData = (void*)data;
+
+    // Push to VENC[0]
+    int ret = RK_MPI_VENC_RGN_SetBitMap(0, &rgn, &bmp);
+    if (ret) {
+        fprintf(stderr, "%s: SetBitMap failed: %d\n", __FUNCTION__, ret);
+        return -1;
+    }
+
+    return 0;
+}
+
+void encoder_clean(void)
 {
     int ret = RK_MPI_VENC_DestroyChn(0);
     if (ret) {
-        printf("ERROR: Destroy VENC[0] error! ret=%d\n", ret);
+        printf("%s: Destroy VENC[0] error! ret=%d\n", __FUNCTION__, ret);
     }
 }

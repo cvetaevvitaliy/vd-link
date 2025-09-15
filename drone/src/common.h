@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef void (*encoder_callback)(void *data, int size, uint32_t timestamp);
+typedef int (*encoder_callback)(void *data, int size, uint32_t timestamp);
 
 typedef enum {
     CODEC_UNKNOWN = 0,
