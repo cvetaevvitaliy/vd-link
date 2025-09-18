@@ -72,3 +72,73 @@ docker rm -f container-rv1126
 docker rmi image-rv1126
 ```
 
+## VSCode Integration
+
+VD-Link provides pre-configured workspace files for native VSCode development without Docker.
+
+### Workspace Files
+
+The project includes two workspace configurations in the root directory:
+- `vd-link-drone.code-workspace` - For drone development (RV1126)
+- `vd-link-gs.code-workspace` - For ground station development (RK3566)
+
+### Setup Instructions
+
+1. **Install Required Extensions:**
+   - C/C++ Extension Pack
+   - CMake Tools
+
+2. **Install Native SDKs:**
+   ```bash
+   # For RK3566 (Ground Station)
+   # Extract SDK to /opt/sdk-rk3566/
+   # Run: /opt/sdk-rk3566/relocate-sdk.sh
+   
+   # For RV1126 (Drone)
+   # Extract SDK to /opt/sdk-rv1126/
+   # Run: /opt/sdk-rv1126/relocate-sdk.sh
+   ```
+
+3. **Open Workspace:**
+   ```bash
+   # For drone development
+   code vd-link-drone.code-workspace
+   
+   # For ground station development
+   code vd-link-gs.code-workspace
+   ```
+
+### Development Workflow
+
+1. **Source SDK Environment:**
+   ```bash
+   # For drone
+   source /opt/sdk-rv1126/environment-setup
+   
+   # For ground station
+   source /opt/sdk-rk3566/environment-setup
+   ```
+
+2. **Open VSCode Workspace:**
+   - Use the appropriate workspace file for your target platform
+   - VSCode will use the native toolchain configuration
+
+3. **Build Project:**
+   - Use `Ctrl+Shift+P` → `CMake: Configure`
+   - Use `Ctrl+Shift+P` → `CMake: Build`
+   - Or use the build buttons in the status bar
+
+### Features
+
+- **IntelliSense:** Fully configured for cross-compilation toolchain
+- **Native Performance:** Direct access to toolchain without Docker overhead
+- **Build Integration:** Seamless CMake integration with native SDK
+- **Platform Isolation:** Separate workspaces prevent configuration conflicts
+
+### Troubleshooting
+
+- **Toolchain not found:** Ensure SDK is installed and environment is sourced
+- **Include errors:** Verify the correct workspace file is opened for your target platform
+- **Build failures:** Check that SDK is properly relocated and environment variables are set
+
+````

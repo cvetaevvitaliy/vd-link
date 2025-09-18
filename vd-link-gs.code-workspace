@@ -1,0 +1,77 @@
+{
+    "folders": [
+        {
+            "name": "vd-link-gs",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "cmake.buildDirectory": "${workspaceFolder}/build-gs",
+        "cmake.configureSettings": {
+            "PLATFORM": "gs",
+            "CMAKE_BUILD_TYPE": "Release"
+        },
+        "cmake.defaultVariants": {
+            "buildType": {
+                "default": "release",
+                "choices": {
+                    "debug": {
+                        "short": "Debug",
+                        "long": "Emit debug information",
+                        "buildType": "Debug"
+                    },
+                    "release": {
+                        "short": "Release",
+                        "long": "Optimize generated code",
+                        "buildType": "Release"
+                    }
+                }
+            }
+        },
+        "files.exclude": {
+            "**/build-drone": true,
+            "**/build": true,
+            "**/.git": true,
+            "**/node_modules": true
+        },
+        "files.associations": {
+            "*.h": "c",
+            "*.c": "c"
+        },
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+        "C_Cpp.default.intelliSenseMode": "linux-gcc-x64"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-vscode.cmake-tools",
+            "ms-vscode.cpptools",
+            "ms-vscode.cpptools-extension-pack"
+        ]
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Debug Ground Station", 
+                "type": "cppdbg",
+                "request": "launch",
+                "program": "${workspaceFolder}/build-gs/gs/vd-link-gs",
+                "args": [],
+                "stopAtEntry": false,
+                "cwd": "${workspaceFolder}",
+                "environment": [],
+                "externalConsole": false,
+                "MIMode": "gdb",
+                "setupCommands": [
+                    {
+                        "description": "Enable pretty-printing for gdb",
+                        "text": "-enable-pretty-printing",
+                        "ignoreFailures": true
+                    }
+                ],
+                "preLaunchTask": "CMake: build",
+                "miDebuggerPath": "/usr/bin/gdb"
+            }
+        ]
+    }
+}
