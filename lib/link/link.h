@@ -130,6 +130,7 @@ typedef void (*displayport_cmd_rx_cb_t)(const char* data, size_t size);
 typedef void (*cmd_rx_cb_t)(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
 
 int link_init(link_role_t is_gs);
+void link_deinit(void);
 
 int link_send_ack(uint32_t ack_id);
 int link_send_displayport(const char* data, size_t size);

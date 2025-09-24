@@ -177,6 +177,15 @@ int link_init(link_role_t is_gs)
     return 0;
 }
 
+void link_deinit(void)
+{
+    run = false;
+    pthread_join(link_listener_thread, NULL);
+    close(link_ctx.listen_sockfd);
+    close(link_ctx.send_sockfd);
+    INFO("Link deinitialized");
+}
+
 int link_send_ack(uint32_t ack_id)
 {
     link_packet_header_t header;

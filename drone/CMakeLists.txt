@@ -121,6 +121,7 @@ add_executable(${PROJECT_NAME}
         src/msp-osd/msp_osd.c
         src/config/config_parser.c
         src/screensaver/screensaver.c
+        src/link_callbacks/link_callbacks.c
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -131,6 +132,7 @@ target_link_libraries(${PROJECT_NAME}
         rtp
         msp
         ini
+        link
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )

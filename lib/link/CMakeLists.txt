@@ -9,5 +9,4 @@ add_library(link STATIC
 
 target_include_directories(link PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/include_common
 )

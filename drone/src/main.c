@@ -15,6 +15,7 @@
 #include "config/config_parser.h"
 #include "rtp_streamer/rtp_streamer.h"
 #include "screensaver/screensaver.h"
+#include "link_callbacks/link_callbacks.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 
@@ -168,6 +169,16 @@ int main(int argc, char *argv[])
         config_cleanup(&config);
         return -1;
     }
+
+    ret = link_init(LINK_DRONE);
+    if (ret != 0) {
+        printf("Failed to initialize link\n");
+        encoder_clean();
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
+    link_register_cmd_rx_cb(link_cmd_rx_callback);
 
     if (screensaver_create_nv12_solid(config.stream_width, config.stream_height,
                                   0x10 /*Y black*/, 0x80 /*U*/, 0x80 /*V*/,
