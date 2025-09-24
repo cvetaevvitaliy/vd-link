@@ -8,12 +8,11 @@
     "settings": {
         "cmake.buildDirectory": "${workspaceFolder}/build-gs",
         "cmake.configureSettings": {
-            "PLATFORM": "gs",
-            "CMAKE_BUILD_TYPE": "Release"
+            "PLATFORM": "gs"
         },
         "cmake.defaultVariants": {
             "buildType": {
-                "default": "release",
+                "default": "debug",
                 "choices": {
                     "debug": {
                         "short": "Debug",

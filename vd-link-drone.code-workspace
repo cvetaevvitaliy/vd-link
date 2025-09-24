@@ -8,12 +8,11 @@
     "settings": {
         "cmake.buildDirectory": "${workspaceFolder}/build-drone",
         "cmake.configureSettings": {
-            "PLATFORM": "drone",
-            "CMAKE_BUILD_TYPE": "Release"
+            "PLATFORM": "drone"
         },
         "cmake.defaultVariants": {
             "buildType": {
-                "default": "release",
+                "default": "debug",
                 "choices": {
                     "debug": {
                         "short": "Debug",

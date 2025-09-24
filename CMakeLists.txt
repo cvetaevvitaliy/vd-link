@@ -58,11 +58,15 @@ if(OS_SUPPORTED)
     endif()
 endif()
 
+include_directories(${CMAKE_SOURCE_DIR}/lib/log)
+
 project(vd-link)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/ini)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/link)
+
 
 # Set target platform: "gs" (default) or "drone"
 set(PLATFORM "gs" CACHE STRING "Target platform: gs or drone")
