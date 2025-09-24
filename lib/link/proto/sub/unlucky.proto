@@ -1,0 +1,17 @@
+syntax = "proto2";
+
+package vdlink.sub;
+
+message UnluckyMessage {
+    required int32 unlucky_number = 1 [default = 13];
+    optional string reason = 2;
+    
+    enum Status {
+        UNKNOWN = 0;
+        BAD_LUCK = 1;
+        VERY_BAD_LUCK = 2;
+        CURSED = 3;
+    }
+    
+    optional Status status = 3 [default = UNKNOWN];
+}

@@ -1,0 +1,11 @@
+# nanopb options for simple.proto
+
+# Set maximum lengths for string fields to use fixed arrays instead of callbacks
+vdlink.SimpleMessage.name max_size:64
+vdlink.SimpleMessage.tags max_count:8 max_size:32
+vdlink.ConfigRequest.command max_size:64
+vdlink.ConfigResponse.error_message max_size:256
+
+# Set maximum sizes for bytes fields
+vdlink.ConfigRequest.payload max_size:1024
+vdlink.ConfigResponse.result max_size:2048

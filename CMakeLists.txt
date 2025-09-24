@@ -59,10 +59,23 @@ if(OS_SUPPORTED)
 endif()
 
 project(vd-link)
+# Make sure CMake can find our custom modules
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+
+include(FetchContent)
+FetchContent_Declare(nanopb
+    GIT_REPOSITORY https://github.com/nanopb/nanopb.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(nanopb)
+
+# Add nanopb's official FindNanopb.cmake to module path
+list(APPEND CMAKE_MODULE_PATH ${nanopb_SOURCE_DIR}/extra)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/ini)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/link)
 
 # Set target platform: "gs" (default) or "drone"
 set(PLATFORM "gs" CACHE STRING "Target platform: gs or drone")

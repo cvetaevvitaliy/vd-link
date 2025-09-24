@@ -1,0 +1,23 @@
+syntax = "proto2";
+
+package vdlink;
+
+message SimpleMessage {
+    required int32 id = 1;
+    required string name = 2;
+    optional float value = 3 [default = 0.0];
+    repeated string tags = 4;
+}
+
+message ConfigRequest {
+    required int32 session_id = 1;
+    required string command = 2;
+    optional bytes payload = 3;
+}
+
+message ConfigResponse {
+    required int32 session_id = 1;
+    required bool success = 2;
+    optional string error_message = 3;
+    optional bytes result = 4;
+}

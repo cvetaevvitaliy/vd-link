@@ -2,6 +2,7 @@ build/
 build-gs/
 build-drone/
 cmake-build*/
+build*/
 .idea/
 .vscode/
 assets/build_datestamp

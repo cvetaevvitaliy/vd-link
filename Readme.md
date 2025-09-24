@@ -35,6 +35,7 @@ Confirmed working on:
 - Download SDK archive: [aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz](https://gitlab.hard-tech.org.ua/-/project/54/uploads/e61180e057be710362a4255e997cd603/aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz)
 - Extract  to `/opt/sdk-rk3566/`
 - Relocate SDK `/opt/sdk-rk3566/relocate-sdk.sh`
+- Install `apt install protobuf-compiler` and python
 
 ```bash
 source /opt/sdk-rk3566/environment-setup
