@@ -21,7 +21,7 @@
 #include <sys/ioctl.h>
 #include <drm/drm_fourcc.h>
 #include <linux/dma-buf.h>
-#include "src/drm_display.h"
+#include "drm_display.h"
 
 #define DECODER_DEBUG 0
 

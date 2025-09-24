@@ -54,6 +54,11 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/lvgl
         ${CMAKE_SOURCE_DIR}/lib/librtp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/decoder
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/drm_display
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/rtp_receiver
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/wfb_status_link
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/link_callbacks
 )
 
 set(MSP_OSD_SRC
@@ -96,14 +101,15 @@ set(MSP_OSD_SRC
 add_executable(${PROJECT_NAME}
         ${MSP_OSD_SRC}
         src/main.c
-        src/drm_display.c
-        src/rtp_receiver.c
-        src/decoder.c
-        src/msp-osd.c
-        src/wfb_status_link.c
+        src/drm_display/drm_display.c
+        src/rtp_receiver/rtp_receiver.c
+        src/decoder/decoder.c
+        src/msp-osd/msp-osd.c
+        src/wfb_status_link/wfb_status_link.c
+        src/link_callbacks/link_callbacks.c
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl
+target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl link
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}

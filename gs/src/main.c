@@ -10,12 +10,13 @@
 #include <signal.h>
 #include <unistd.h>
 #include <getopt.h>
-#include "src/rtp_receiver.h"
+#include "rtp_receiver.h"
 #include "src/common.h"
-#include "src/drm_display.h"
+#include "drm_display.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
 #include "ui/ui.h"
+#include "link_callbacks.h"
 
 static volatile int running = 1;
 
@@ -124,6 +125,11 @@ int main(int argc, char* argv[])
     msp_osd_init(&config);
 
     rtp_receiver_start(&config);
+
+    link_init(LINK_GROUND_STATION);
+    link_register_displayport_rx_cb(update_displayport_cb);
+    link_register_sys_telemetry_rx_cb(update_sys_telemetry);
+    link_register_detection_rx_cb(update_detection_results);
 
     ui_init();
 
