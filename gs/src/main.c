@@ -15,14 +15,16 @@
 #include "drm_display.h"
 #include "msp-osd.h"
 #include "wfb_status_link.h"
-#include "ui/ui.h"
+#include "ui.h"
 #include "link_callbacks.h"
 
 static volatile int running = 1;
+_Atomic int termination_requested = 0;
 
 static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
+    termination_requested = 1;
     running = 0;
     ui_deinit();
     msp_osd_stop();

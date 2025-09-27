@@ -1,0 +1,17 @@
+
+file(GLOB_RECURSE UI_SRC ${CMAKE_CURRENT_LIST_DIR}/*.c)
+list(FILTER UI_SRC EXCLUDE REGEX ".*/fonts/.*")
+list(FILTER UI_SRC EXCLUDE REGEX ".*/menu.c")
+message(STATUS "UI_SRC: ${UI_SRC}")
+
+set(BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
+set(UI_INCLUDE_DIRS ${BASE_DIR})
+file(GLOB SUBDIRS LIST_DIRECTORIES true RELATIVE ${BASE_DIR} ${BASE_DIR}/*)
+foreach(subdir IN LISTS SUBDIRS)
+    if(IS_DIRECTORY ${BASE_DIR}/${subdir})
+        list(APPEND UI_INCLUDE_DIRS ${BASE_DIR}/${subdir})
+    endif()
+endforeach()
+
+file(GLOB UI_FONTS_SRC ${CMAKE_CURRENT_LIST_DIR}/fonts/*.c)
+set(UI_FONTS_SRC ${UI_FONTS_SRC})

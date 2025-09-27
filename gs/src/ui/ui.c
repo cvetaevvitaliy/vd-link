@@ -8,13 +8,18 @@
 #include <stdatomic.h>
 #include <time.h>
 #include "ui.h"
+#include "ui_interface.h"
 #include "drm_display.h"
 #include "msp-osd.h"
-#include "lang/lang.h"
 #include "lvgl/lvgl.h"
 #include <rga/im2d_buffer.h>
 #include <rga/im2d_single.h>
 #include <rga/rga.h>
+#include "main_menu.h"
+#include "input.h"
+#include "platform.h"
+#include "log.h"
+#include "lang.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -22,19 +27,26 @@
 #define LVGL_BUFF_WIDTH 1280
 #define LVGL_BUFF_HEIGHT 720
 
+static const char *module_name_str = "UI";
+
 static void *lvgl_buf1 = NULL;
 static void *lvgl_buf2 = NULL;
 static lv_display_t *disp = NULL;
 static pthread_t tick_tid;
 static int tick_running = 1;
+static _Atomic int ui_init_done = 0;
 static void *fb_addr = NULL;
 
 static void *tick_thread(void *arg)
 {
     (void)arg;
-    printf("[ UI ] Tick thread started\n");
+    DEBUG("Tick thread started\n");
     struct timespec prev, now;
     clock_gettime(CLOCK_MONOTONIC, &prev);
+
+    while (!ui_init_done) {
+        usleep(1000); // Wait until UI is initialized
+    }
 
     while (atomic_load(&tick_running)) {
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -47,7 +59,7 @@ static void *tick_thread(void *arg)
         usleep(1000);
     }
 
-    printf("[ UI ] Tick thread exiting\n");
+    DEBUG("Tick thread exiting\n");
     return NULL;
 }
 
@@ -56,7 +68,7 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
    //printf("[ UI ] Flush callback called for area: (%d, %d) - (%d, %d)\n", area->x1, area->y1, area->x2, area->y2);
 
     if (fb_addr == NULL) {
-        printf("[ UI ] Failed to get OSD framebuffer address\n");
+        ERROR("Failed to get OSD framebuffer address\n");
         return;
     }
 
@@ -86,11 +98,8 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
                 fb[fb_offset + 0] = color.blue;
                 fb[fb_offset + 1] = color.green;
                 fb[fb_offset + 2] = color.red;
-                if (color.alpha < 32) {
-                    fb[fb_offset + 3] = 0;
-                } else {
-                    fb[fb_offset + 3] = color.alpha;
-                }
+                fb[fb_offset + 3] = color.alpha;
+                //fb[fb_offset + 3] = 0x00;
             }
         }
     }
@@ -107,14 +116,13 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
     int width = LVGL_BUFF_WIDTH;
     int height = LVGL_BUFF_HEIGHT;
 
-    rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_RGBA_8888);
-    rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_RGBA_8888);
+    rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_BGRA_8888);
+    rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_BGRA_8888);
 
-    IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_SRC_OVER);
+    IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_DST_OVER);
 
     if (ret != IM_STATUS_SUCCESS) {
-        fprintf(stderr, "RGA: imblend failed: %d\n", ret);
-        return;
+        ERROR("RGA: imblend failed: %d\n", ret);
     }
 
     // Push the new squashed frame to DRM
@@ -123,6 +131,8 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
 
 void drm_osd_frame_done_cb(void)
 {
+    // memset(lvgl_buf1, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
+    // memset(lvgl_buf2, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
     lv_display_flush_ready(disp);
 }
 
@@ -159,6 +169,9 @@ int ui_init(void)
     }
 
     lv_display_set_buffers(disp, lvgl_buf1, lvgl_buf2, fb_size, LV_DISPLAY_RENDER_MODE_FULL);
+    
+    // Set color format to support alpha channel properly in LVGL 9
+    lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED);
 
     printf("[ UI ] Initialized LVGL display with size %dx%d\n", LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
 
@@ -168,44 +181,22 @@ int ui_init(void)
 
     lang_set_english();
 
-    // Create a transparent background style
-    static lv_style_t style_transp_bg;
-    lv_style_init(&style_transp_bg);
-    lv_style_set_bg_opa(&style_transp_bg, LV_OPA_TRANSP);
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED);
-    lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_20, LV_STYLE_STATE_CMP_SAME);
-    lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
+    lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_0, LV_PART_MAIN);
 
-    lv_obj_t *black_square = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(black_square, 170, 60);
-    lv_obj_align(black_square, LV_ALIGN_BOTTOM_MID, 0, -52);
-    lv_obj_set_style_bg_color(black_square, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(black_square, LV_OPA_50, LV_PART_MAIN);
+    lv_disp_enable_invalidation(NULL, false);
 
-    lv_obj_t *label = lv_label_create(black_square);
-    lv_label_set_text(label,  lang_get_str(STR_HELLO));
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    if (is_keyboard_supported()) {
+        ui_keypad_init();
+    }
 
-    lv_obj_t *red_square = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(red_square, 50, 50);
-    lv_obj_align(red_square, LV_ALIGN_BOTTOM_MID, -60, 0);
-    lv_obj_set_style_bg_color(red_square, lv_color_make(255, 0, 0 ), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(red_square, 200, LV_PART_MAIN);
+    ui_interface_init(disp);
 
-    // Create a green square
-    lv_obj_t *green_square = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(green_square, 50, 50);
-    lv_obj_align(green_square, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(green_square, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(green_square, 200, LV_PART_MAIN);
+    if (is_keyboard_supported()) {
+        main_menu_create(lv_scr_act());
+    }
 
-    // Create a blue square
-    lv_obj_t *blue_square = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(blue_square, 50, 50);
-    lv_obj_align(blue_square, LV_ALIGN_BOTTOM_MID, 60, 0);
-    lv_obj_set_style_bg_color(blue_square, lv_color_make(0, 0, 255), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(blue_square, 128, LV_PART_MAIN);
+    ui_init_done = 1;
+    lv_disp_enable_invalidation(NULL, true);
 
     return 0;
 }
@@ -214,6 +205,10 @@ void ui_deinit(void)
 {
     atomic_store(&tick_running, 0);
     pthread_join(tick_tid, NULL);
+
+    main_menu_destroy();
+    ui_interface_deinit();
+    ui_keypad_deinit();
 
     if (lvgl_buf1)
         free(lvgl_buf1);
