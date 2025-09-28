@@ -137,6 +137,7 @@ int link_send_displayport(const char* data, size_t size);
 int link_send_detection(const link_detection_box_t* data, size_t count);
 int link_send_sys_telemetry(float cpu_temp, float cpu_usage);
 int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
+int link_send_cmd_sync(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size, void* resp_data, size_t* resp_size, uint32_t timeout_ms);
 
 void link_register_detection_rx_cb(detection_cmd_rx_cb_t cb);
 void link_register_sys_telemetry_rx_cb(sys_telemetry_cmd_rx_cb_t cb);

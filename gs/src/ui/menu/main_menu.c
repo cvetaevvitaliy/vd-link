@@ -2,6 +2,7 @@
 #include "menu_engine.h"
 #include "log.h"
 #include "callbacks_wifi.h"
+#include "callbacks_rtp.h"
 
 
 static const char *module_name_str = "MAIN_MENU";
@@ -35,16 +36,35 @@ static void create_menu_pages(menu_ctx_t *ctx)
     lv_obj_t *item = NULL;
     
     /* WFB-NG tab */
-    item = create_dropdown_item(wfb_ng_tab, "Bitrate", "400 Kbps\n800 Kbps\n1.2 Mbps\n1.6 Mbps\n2.0 Mbps\n4.0 Mbps\n");
+    item = create_dropdown_item(wfb_ng_tab, "Bitrate", bitrate_values_str);
     add_object_to_section(ctx, MENU_PAGE_WFB_NG, item);
-    // TODO: Add bitrate callbacks when system functions are available
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_DROPDOWN,
+        .callbacks.dropdown = {
+            .get =  wfb_ng_get_bitrate,
+            .set = wfb_ng_set_bitrate
+        }
+    });
     
-    item = create_dropdown_item(wfb_ng_tab, "Codec", "H.264\nH.265");
+    item = create_dropdown_item(wfb_ng_tab, "Codec", codec_values_str);
     add_object_to_section(ctx, MENU_PAGE_WFB_NG, item);
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_DROPDOWN,
+        .callbacks.dropdown = {
+            .get =  wfb_ng_get_codec,
+            .set = wfb_ng_set_codec
+        }
+    });
 
     item = create_slider_item(wfb_ng_tab, "GOP", 1, 30, 2);
     add_object_to_section(ctx, MENU_PAGE_WFB_NG, item);
-    // TODO: Add GOP callbacks when system functions are available
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_SLIDER,
+        .callbacks.slider = {
+            .get = wfb_ng_get_gop,
+            .set = wfb_ng_set_gop
+        }
+    });
 
     wfb_ng_get_frequencies();
     item = create_dropdown_item(wfb_ng_tab, "Frequency", wfb_ng_get_frequencies_str());

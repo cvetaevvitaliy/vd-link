@@ -10,7 +10,21 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <sys/time.h>
+#include <errno.h>
 #include "log.h"
+
+typedef struct {
+    bool waiting;
+    bool response_ready;
+    link_command_id_t cmd_id;
+    link_subcommand_id_t subcmd_id;
+    void* resp_data;
+    size_t resp_size;
+    size_t max_resp_size;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+} sync_cmd_ctx_t;
 
 typedef struct {
     int send_sockfd;
@@ -32,6 +46,7 @@ static link_context_t link_ctx;
 static pthread_t link_listener_thread;
 static volatile bool run = true;
 static link_callbacks_t link_callbacks = {0};
+static sync_cmd_ctx_t sync_cmd_ctx = {0};
 
 static int link_process_incoming_data(const char* data, size_t size);
 
@@ -97,10 +112,36 @@ static int link_process_incoming_data(const char* data, size_t size)
             {
                 DEBUG("Received command packet");
                 link_command_pkt_t* cmd_pkt = (link_command_pkt_t*)data;
-                if (link_callbacks.cmd_cb) {
-                    link_callbacks.cmd_cb(cmd_pkt->cmd_id,  cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
+                
+                // Check if this is a response to a synchronous command
+                pthread_mutex_lock(&sync_cmd_ctx.mutex);
+                if (sync_cmd_ctx.waiting && 
+                    cmd_pkt->subcmd_id == sync_cmd_ctx.subcmd_id &&
+                    (cmd_pkt->cmd_id == LINK_CMD_ACK || cmd_pkt->cmd_id == LINK_CMD_NACK)) {
+                    
+                    // Copy response data if available and buffer has space
+                    if (cmd_pkt->size > 0 && sync_cmd_ctx.resp_data && sync_cmd_ctx.max_resp_size > 0) {
+                        size_t copy_size = (cmd_pkt->size < sync_cmd_ctx.max_resp_size) ? 
+                                          cmd_pkt->size : sync_cmd_ctx.max_resp_size;
+                        memcpy(sync_cmd_ctx.resp_data, cmd_pkt->data, copy_size);
+                        sync_cmd_ctx.resp_size = copy_size;
+                    } else {
+                        sync_cmd_ctx.resp_size = 0;
+                    }
+                    
+                    sync_cmd_ctx.cmd_id = cmd_pkt->cmd_id;  // Store if it was ACK or NACK
+                    sync_cmd_ctx.response_ready = true;
+                    pthread_cond_signal(&sync_cmd_ctx.cond);
+                    pthread_mutex_unlock(&sync_cmd_ctx.mutex);
                 } else {
-                    ERROR("No command callback registered");
+                    pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+                    
+                    // Handle as regular command callback
+                    if (link_callbacks.cmd_cb) {
+                        link_callbacks.cmd_cb(cmd_pkt->cmd_id,  cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
+                    } else {
+                        ERROR("No command callback registered");
+                    }
                 }
             }
             break;
@@ -128,10 +169,25 @@ int link_init(link_role_t is_gs)
 {
     link_ctx.listener_port = LINK_PORT_RX;
 
+    // Initialize synchronous command context
+    if (pthread_mutex_init(&sync_cmd_ctx.mutex, NULL) != 0) {
+        PERROR("Failed to initialize sync command mutex");
+        return -1;
+    }
+    if (pthread_cond_init(&sync_cmd_ctx.cond, NULL) != 0) {
+        PERROR("Failed to initialize sync command condition variable");
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
+        return -1;
+    }
+    sync_cmd_ctx.waiting = false;
+    sync_cmd_ctx.response_ready = false;
+
     // Create UDP socket
     link_ctx.send_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (link_ctx.send_sockfd < 0) {
         PERROR("Failed to create send socket");
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
         return -1;
     }
 
@@ -139,6 +195,8 @@ int link_init(link_role_t is_gs)
     if (link_ctx.listen_sockfd < 0) {
         PERROR("Failed to create listen socket");
         close(link_ctx.send_sockfd);
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
         return -1;
     }
 
@@ -171,6 +229,8 @@ int link_init(link_role_t is_gs)
         PERROR("Failed to create listener thread");
         close(link_ctx.listen_sockfd);
         close(link_ctx.send_sockfd);
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
         return -1;
     }
 
@@ -180,9 +240,23 @@ int link_init(link_role_t is_gs)
 void link_deinit(void)
 {
     run = false;
+    
+    // Wake up any waiting synchronous command
+    pthread_mutex_lock(&sync_cmd_ctx.mutex);
+    if (sync_cmd_ctx.waiting) {
+        sync_cmd_ctx.response_ready = true;
+        sync_cmd_ctx.cmd_id = LINK_CMD_NACK;  // Signal failure due to shutdown
+        pthread_cond_signal(&sync_cmd_ctx.cond);
+    }
+    pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+    
     pthread_join(link_listener_thread, NULL);
     close(link_ctx.listen_sockfd);
     close(link_ctx.send_sockfd);
+    
+    pthread_cond_destroy(&sync_cmd_ctx.cond);
+    pthread_mutex_destroy(&sync_cmd_ctx.mutex);
+    
     INFO("Link deinitialized");
 }
 
@@ -291,6 +365,92 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
     DEBUG("Sent command packet: cmd_id=%d, subcmd_id=%d, size=%zu", cmd_id, subcmd_id, sent);
 
     return 0;
+}
+
+int link_send_cmd_sync(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, const void* data, size_t size, void* resp_data, size_t* resp_size, uint32_t timeout_ms)
+{
+    if (resp_size == NULL) {
+        ERROR("resp_size parameter cannot be NULL");
+        return -1;
+    }
+    
+    size_t max_resp_size = *resp_size;
+    *resp_size = 0;  // Initialize to 0
+    
+    // Set up synchronous command context
+    pthread_mutex_lock(&sync_cmd_ctx.mutex);
+    
+    if (sync_cmd_ctx.waiting) {
+        pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+        ERROR("Another synchronous command is already in progress");
+        return -1;
+    }
+    
+    sync_cmd_ctx.waiting = true;
+    sync_cmd_ctx.response_ready = false;
+    sync_cmd_ctx.subcmd_id = subcmd_id;
+    sync_cmd_ctx.resp_data = resp_data;
+    sync_cmd_ctx.resp_size = 0;
+    sync_cmd_ctx.max_resp_size = max_resp_size;
+    
+    pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+    
+    // Send the command
+    int send_result = link_send_cmd(cmd_id, subcmd_id, data, size);
+    if (send_result < 0) {
+        // Reset sync context on send failure
+        pthread_mutex_lock(&sync_cmd_ctx.mutex);
+        sync_cmd_ctx.waiting = false;
+        pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+        ERROR("Failed to send synchronous command");
+        return -1;
+    }
+    
+    // Wait for response with timeout
+    struct timespec timeout;
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    
+    timeout.tv_sec = now.tv_sec + (timeout_ms / 1000);
+    timeout.tv_nsec = (now.tv_usec * 1000) + ((timeout_ms % 1000) * 1000000);
+    if (timeout.tv_nsec >= 1000000000) {
+        timeout.tv_sec++;
+        timeout.tv_nsec -= 1000000000;
+    }
+    
+    pthread_mutex_lock(&sync_cmd_ctx.mutex);
+    
+    int wait_result = 0;
+    while (!sync_cmd_ctx.response_ready && wait_result == 0) {
+        wait_result = pthread_cond_timedwait(&sync_cmd_ctx.cond, &sync_cmd_ctx.mutex, &timeout);
+    }
+    
+    // Extract results
+    int result = -1;
+    if (wait_result == 0 && sync_cmd_ctx.response_ready) {
+        if (sync_cmd_ctx.cmd_id == LINK_CMD_ACK) {
+            result = 0;  // Success
+            *resp_size = sync_cmd_ctx.resp_size;
+            DEBUG("Synchronous command succeeded, response size: %zu", sync_cmd_ctx.resp_size);
+        } else {
+            result = -2;  // NACK received
+            ERROR("Synchronous command was NACKed");
+        }
+    } else if (wait_result == ETIMEDOUT) {
+        result = -3;  // Timeout
+        ERROR("Synchronous command timed out after %d ms", timeout_ms);
+    } else {
+        result = -4;  // Other error
+        ERROR("Synchronous command failed with wait error: %d", wait_result);
+    }
+    
+    // Reset sync context
+    sync_cmd_ctx.waiting = false;
+    sync_cmd_ctx.response_ready = false;
+    
+    pthread_mutex_unlock(&sync_cmd_ctx.mutex);
+    
+    return result;
 }
 
 
