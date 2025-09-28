@@ -108,7 +108,7 @@ add_executable(${PROJECT_NAME}
         ${UI_SRC}
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl link
+target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl link pthread
         ${ROCKCHIPMPP_LIBRARIES}
         ${LIBDRM_LIBRARIES}
         ${LIBRGA_LIBRARIES}
