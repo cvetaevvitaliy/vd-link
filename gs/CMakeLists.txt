@@ -103,6 +103,7 @@ add_executable(${PROJECT_NAME}
         src/link_callbacks/link_callbacks.c
         src/platform/platform.c
         src/hal/wifi_api.c
+        src/hal/display_api.c
         ${UI_FONTS_SRC}
         ${MSP_OSD_SRC}
         ${UI_SRC}

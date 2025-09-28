@@ -3,6 +3,7 @@
 #include "log.h"
 #include "callbacks_wifi.h"
 #include "callbacks_rtp.h"
+#include "display_api.h"
 
 
 static const char *module_name_str = "MAIN_MENU";
@@ -145,6 +146,13 @@ static void create_menu_pages(menu_ctx_t *ctx)
     /* Display settings tab*/
     item = create_switch_item(display_tab, "Show CPU load and Temp of remote device", true);
     add_object_to_section(ctx, MENU_PAGE_DISPLAY, item);
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_SWITCH,
+        .callbacks.switch_cb = {
+            .get = NULL, // Define this handler in your system code
+            .set = NULL  // Define this handler in your system code
+        }
+    });
 
     item = create_switch_item(display_tab, "Hide status bar by default", true);
     add_object_to_section(ctx, MENU_PAGE_DISPLAY, item);
@@ -154,6 +162,16 @@ static void create_menu_pages(menu_ctx_t *ctx)
 
     item = create_switch_item(display_tab, "Show WFB-ng telemetry", true);
     add_object_to_section(ctx, MENU_PAGE_DISPLAY, item);
+
+    item = create_slider_item(display_tab, "Brightness", 1, 255, 200);
+    add_object_to_section(ctx, MENU_PAGE_DISPLAY, item);
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_SLIDER,
+        .callbacks.slider = {
+            .get = display_api_get_brightness,
+            .set = display_api_set_brightness
+        }
+    });
 
     DEBUG("Menu pages created successfully");
 }
