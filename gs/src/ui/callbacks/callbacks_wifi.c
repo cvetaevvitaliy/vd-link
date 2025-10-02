@@ -148,3 +148,10 @@ void wfb_ng_set_bandwidth(uint16_t bandwidth_idx)
     uint32_t bandwidth = bandwidth_idx == 0 ? 20 : (bandwidth_idx == 1 ? 40 : (bandwidth_idx == 2 ? 80 : 160));
     wifi_api_set_bandwidth(WIFI_EXTERNAL, bandwidth);
 }
+
+const char* get_wlan0_ip_address()
+{
+    static char ip_address[16];
+    wifi_api_get_ip_address(WIFI_EXTERNAL, ip_address, sizeof(ip_address));
+    return ip_address;
+}

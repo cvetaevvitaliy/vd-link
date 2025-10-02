@@ -143,6 +143,10 @@ static void create_menu_pages(menu_ctx_t *ctx)
     item = create_button_item(system_tab, "About", "Author and Version");
     add_object_to_section(ctx, MENU_PAGE_SYSTEM, item);
 
+    item = create_button_item(display_tab, "wlan0 IP", get_wlan0_ip_address());
+    add_object_to_section(ctx, MENU_PAGE_SYSTEM, item);
+
+
     /* Display settings tab*/
     item = create_switch_item(display_tab, "Show CPU load and Temp of remote device", true);
     add_object_to_section(ctx, MENU_PAGE_DISPLAY, item);

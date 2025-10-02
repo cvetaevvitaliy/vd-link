@@ -11,6 +11,8 @@
 #include <linux/nl80211.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
 #include "log.h"
 
 static const char *module_name_str = "WIFI_API";
@@ -1014,3 +1016,31 @@ int wifi_api_set_channel(char *iface, uint32_t freq, uint32_t bandwidth) {
     return 0;
 }
 #endif
+
+void wifi_api_get_ip_address(char *iface, char *ip_buffer, size_t buffer_size)
+{
+    if (!iface || !*iface || !ip_buffer || buffer_size == 0) {
+        return;
+    }
+
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) {
+        PERROR("getifaddrs failed");
+        return;
+    }
+
+    ip_buffer[0] = '\0'; // Initialize buffer
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        if (strcmp(ifa->ifa_name, iface) == 0 && ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
+            inet_ntop(AF_INET, &sa->sin_addr, ip_buffer, buffer_size);
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+}

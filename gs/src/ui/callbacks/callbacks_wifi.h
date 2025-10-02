@@ -19,5 +19,5 @@ uint16_t wfb_ng_get_current_frequency();  // Returns index of current frequency 
 void wfb_ng_set_frequency(uint16_t frequency_idx); // Sets frequency by index
 uint16_t wfb_ng_get_current_bandwidth(); // Returns current bandwidth in MHz
 void wfb_ng_set_bandwidth(uint16_t bandwidth_idx); // Sets bandwidth in MHz
-
+const char* get_wlan0_ip_address();
 #endif // CALLBACKS_H

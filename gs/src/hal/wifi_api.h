@@ -18,4 +18,5 @@ int wifi_api_get_phy_index(const char *phy_name);
 void wifi_api_cleanup(void);
 uint32_t wifi_api_get_bandwidth(char *iface);
 int wifi_api_set_bandwidth(char *iface, uint32_t bandwidth);
+void wifi_api_get_ip_address(char *iface, char *ip_buffer, size_t buffer_size);
 // int wifi_api_set_channel(char *iface, uint32_t freq, uint32_t bandwidth);
