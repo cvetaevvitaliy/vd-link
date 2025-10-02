@@ -63,7 +63,7 @@ static void print_banner(void)
     );
 }
 
-static void parse_args(int argc, char* argv[], struct common_config_t* config)
+static void parse_args(int argc, char* argv[], common_config_t* config)
 {
     static struct option long_options[] = {
         {"ip", required_argument, 0, 'i'},
@@ -109,7 +109,7 @@ static void parse_args(int argc, char* argv[], struct common_config_t* config)
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    struct common_config_t config = {0}; // common configuration
+    common_config_t config = {0}; // common configuration
     screensaver_nv12_t screensaver; // screensaver frame (if camera not available)
 
     // set defaults configs

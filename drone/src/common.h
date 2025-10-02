@@ -84,17 +84,25 @@ typedef struct {
 } camera_csi_config_t;
 
 typedef struct {
+    int device_index; // e.g., /dev/video0 -> 0
+    int width;
+    int height;
+    int fps;
+} camera_usb_config_t;
+
+typedef struct {
     char *ip;    // Destination IP address
     int port;    // Destination port
 } rtp_streamer_config_t;
 
-struct common_config_t {
+typedef struct {
     camera_csi_config_t camera_csi_config;
+    camera_usb_config_t camera_usb_config;
     rtp_streamer_config_t rtp_streamer_config;
     encoder_config_t encoder_config;
     int stream_width;
     int stream_height;
     int stream_bitrate;
-};
+} common_config_t;
 
 #endif //CONFIG_H

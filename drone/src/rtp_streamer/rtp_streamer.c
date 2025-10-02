@@ -64,7 +64,7 @@ static int rtp_socket_open(const char* ip, int port)
     return 0;
 }
 
-int rtp_streamer_init(struct common_config_t *cfg)
+int rtp_streamer_init(common_config_t *cfg)
 {
     int ret = 0;
     rtp_packet_setsize(DEFAULT_FRAME_SIZE);

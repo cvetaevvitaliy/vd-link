@@ -179,10 +179,10 @@ static int parse_resolution(const char *txt, int *w, int *h) {
 
 /* ========================== Macros: setter generators ========================== */
 
-typedef int (*config_setter)(struct common_config_t *cfg, const char *value);
+typedef int (*config_setter)(common_config_t *cfg, const char *value);
 
 #define DEF_SETTER_INT(FUNC, FIELD_LVAL, MINV, MAXV, KEYSTR)            \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     int iv;                                                              \
     if (parse_int(val, (MINV), (MAXV), &iv) != 0) {                      \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
@@ -193,7 +193,7 @@ static int FUNC(struct common_config_t *cfg, const char *val) {          \
 }
 
 #define DEF_SETTER_U32(FUNC, FIELD_LVAL, MINV, MAXV, KEYSTR)            \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     uint32_t uv;                                                         \
     if (parse_u32(val, (MINV), (MAXV), &uv) != 0) {                      \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
@@ -204,7 +204,7 @@ static int FUNC(struct common_config_t *cfg, const char *val) {          \
 }
 
 #define DEF_SETTER_FLOAT(FUNC, FIELD_LVAL, MINV, MAXV, KEYSTR)           \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     float fv;                                                            \
     if (parse_float(val, (MINV), (MAXV), &fv) != 0) {                    \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
@@ -215,7 +215,7 @@ static int FUNC(struct common_config_t *cfg, const char *val) {          \
 }
 
 #define DEF_SETTER_BOOL(FUNC, FIELD_LVAL, KEYSTR)                        \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     bool bv;                                                             \
     if (parse_bool(val, &bv) != 0) {                                     \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
@@ -226,7 +226,7 @@ static int FUNC(struct common_config_t *cfg, const char *val) {          \
 }
 
 #define DEF_SETTER_ENUM(FUNC, FIELD_LVAL, PARSE_FN, KEYSTR)              \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     __typeof__(FIELD_LVAL) tmp;                                          \
     if (PARSE_FN(val, &tmp) != 0) {                                      \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
@@ -237,7 +237,7 @@ static int FUNC(struct common_config_t *cfg, const char *val) {          \
 }
 
 #define DEF_SETTER_IP(FUNC, FIELD_LVAL, KEYSTR)                          \
-static int FUNC(struct common_config_t *cfg, const char *val) {          \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
     if (validate_ip_literal(val) != 0) {                                 \
         fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
         return -1;                                                       \
@@ -294,7 +294,7 @@ DEF_SETTER_BOOL (set_cam_backlight_enable,  cfg->camera_csi_config.backlight_ena
 DEF_SETTER_INT  (set_cam_backlight_strength,cfg->camera_csi_config.backlight_strength, 0, 255, "camera-csi.backlight_strength")
 
 // video (common resolution for camera, encoder, stream)
-static int set_common_resolution(struct common_config_t *cfg, const char *val) {
+static int set_common_resolution(common_config_t *cfg, const char *val) {
     int w, h;
     if (parse_resolution(val, &w, &h) != 0) {
         fprintf(stderr, "config: invalid video.resolution '%s' (allowed: FullHD, HD, qHD, SD, XGA, VGA)\n", val);
@@ -310,7 +310,7 @@ static int set_common_resolution(struct common_config_t *cfg, const char *val) {
     return 0;
 }
 
-static int set_common_bitrate(struct common_config_t *cfg, const char *val)
+static int set_common_bitrate(common_config_t *cfg, const char *val)
 {
     int br;
     if (parse_int(val, 1000, (1<<30), &br) != 0) {
@@ -382,7 +382,7 @@ static int ini_dispatch(void* user, const char* section, const char* name, const
     // Debug log for every parsed key
     //fprintf(stderr, "DEBUG: section='%s' key='%s' val='%s'\n", section ? section : "(null)", name ? name : "(null)", value ? value : "(null)");
 
-    struct common_config_t *cfg = (struct common_config_t*)user;
+    common_config_t *cfg = (common_config_t*)user;
     if (!cfg || !section || !name || !value) {
         fprintf(stderr, "FAIL: ini_dispatch received null arguments\n");
         return 0; // do not abort parsing, just log
@@ -424,7 +424,7 @@ static int ini_dispatch(void* user, const char* section, const char* name, const
     return 0;
 }
 
-int config_load(const char *path, struct common_config_t *cfg)
+int config_load(const char *path, common_config_t *cfg)
 {
     if (!path || !cfg)
         return -1;
@@ -448,9 +448,9 @@ int config_load(const char *path, struct common_config_t *cfg)
     return 0;
 }
 
-void config_init_defaults(struct common_config_t *cfg)
+void config_init_defaults(common_config_t *cfg)
 {
-    memset(cfg, 0, sizeof(struct common_config_t));
+    memset(cfg, 0, sizeof(common_config_t));
 
     // Resolution preset -> applies to encoder/stream/camera
     set_common_resolution(cfg, "HD");
@@ -499,7 +499,7 @@ void config_init_defaults(struct common_config_t *cfg)
 
 }
 
-void config_cleanup(struct common_config_t *cfg)
+void config_cleanup(common_config_t *cfg)
 {
     if (!cfg) return;
 
