@@ -136,7 +136,12 @@ void drm_osd_frame_done_cb(void)
     lv_display_flush_ready(disp);
 }
 
-int ui_init(void)
+static void wfb_status_link_callback(const wfb_rx_status *st)
+{
+    ui_update_wfb_ng_telemetry(st);
+}
+
+int ui_init(struct config_t *cfg)
 {
     lv_init();
 
@@ -195,6 +200,8 @@ int ui_init(void)
         main_menu_create(lv_scr_act());
     }
 
+    wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
+
     ui_init_done = 1;
     lv_disp_enable_invalidation(NULL, true);
 
@@ -203,6 +210,9 @@ int ui_init(void)
 
 void ui_deinit(void)
 {
+
+    wfb_status_link_stop();
+
     atomic_store(&tick_running, 0);
     pthread_join(tick_tid, NULL);
 

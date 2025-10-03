@@ -104,6 +104,7 @@ include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hal
         ${CMAKE_SOURCE_DIR}/lib/librtp/include
         ${CMAKE_SOURCE_DIR}/lib/msp/src
         ${CMAKE_SOURCE_DIR}/lib/ini/src
@@ -123,6 +124,7 @@ add_executable(${PROJECT_NAME}
         src/config/config_parser.c
         src/screensaver/screensaver.c
         src/link_callbacks/link_callbacks.c
+        src/hal/cpuinfo.c
 )
 
 target_link_libraries(${PROJECT_NAME}

@@ -5,6 +5,7 @@
 #ifndef UI_H
 #define UI_H
 #include "lvgl/lvgl.h"
+#include "common.h"
 
 LV_FONT_DECLARE(montserrat_cyrillic_14);
 LV_FONT_DECLARE(montserrat_cyrillic_16);
@@ -23,7 +24,7 @@ LV_FONT_DECLARE(montserrat_cyrillic_40);
 LV_FONT_DECLARE(montserrat_cyrillic_42);
 LV_FONT_DECLARE(montserrat_cyrillic_48);
 
-int ui_init(void);
+int ui_init(struct config_t *cfg);
 void ui_deinit(void);
 
 #endif //UI_H

@@ -133,7 +133,7 @@ int main(int argc, char* argv[])
     link_register_sys_telemetry_rx_cb(update_sys_telemetry);
     link_register_detection_rx_cb(update_detection_results);
 
-    ui_init();
+    ui_init(&config);
 
     while (running) {
         usleep(100000); // Sleep for 100 ms

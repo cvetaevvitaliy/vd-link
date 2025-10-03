@@ -382,7 +382,7 @@ static void* msp_osd_thread(void *arg)
     start_display();
     usleep(100000);
 
-    wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
+    // wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
 
 #if 0    // test all characters
     uint8_t c = 0;
@@ -405,7 +405,7 @@ static void* msp_osd_thread(void *arg)
         usleep(16000); // Simulate 60 FPS
     }
 
-    wfb_status_link_stop();
+    // wfb_status_link_stop();
 
     free(display_driver);
     free(msp_state);

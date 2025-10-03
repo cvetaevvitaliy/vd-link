@@ -210,6 +210,15 @@ int main(int argc, char *argv[])
         return -1;
     }
     link_register_cmd_rx_cb(link_cmd_rx_callback);
+    // Start telemetry thread
+    ret = link_start_telemetry_thread();
+    if (ret != 0) {
+        printf("Failed to start telemetry thread\n");
+        encoder_clean();
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
 
     /* Bind camera to encoder */
     /*If no camera is detected, use screensaver */
@@ -235,6 +244,7 @@ int main(int argc, char *argv[])
         if (!primary_camera) {
             encoder_manual_push_frame(&config.encoder_config, screensaver.data, (int)screensaver.size_bytes);
         }
+        
         usleep(16 * 1000);
     }
 
@@ -250,6 +260,7 @@ int main(int argc, char *argv[])
     }
 
     camera_csi_deinit(&config.camera_csi_config);
+    link_stop_telemetry_thread();
 
     encoder_clean();
     rtp_streamer_deinit();
