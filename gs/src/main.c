@@ -132,6 +132,7 @@ int main(int argc, char* argv[])
     link_register_displayport_rx_cb(update_displayport_cb);
     link_register_sys_telemetry_rx_cb(update_sys_telemetry);
     link_register_detection_rx_cb(update_detection_results);
+    link_register_cmd_rx_cb(link_process_cmd);
 
     ui_init(&config);
 

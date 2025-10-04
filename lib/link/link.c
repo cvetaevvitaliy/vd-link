@@ -14,6 +14,9 @@
 #include <errno.h>
 #include "log.h"
 
+#undef ENABLE_DEBUG
+#define ENABLE_DEBUG 0
+
 typedef struct {
     bool waiting;
     bool response_ready;
@@ -54,10 +57,11 @@ static void* link_listener_thread_func(void* arg)
 {
     (void)arg;
     char buffer[4096];
+    struct sockaddr_in received_from_addr;  // Separate variable for received packet sender
     while (run) {
-        socklen_t addr_len = sizeof(link_ctx.sender_addr);
+        socklen_t addr_len = sizeof(received_from_addr);
         ssize_t bytes_received = recvfrom(link_ctx.listen_sockfd, buffer, sizeof(buffer), 0,
-                                          (struct sockaddr*)&link_ctx.sender_addr, &addr_len);
+                                          (struct sockaddr*)&received_from_addr, &addr_len);
         if (bytes_received < 0) {
             PERROR("recvfrom");
             continue;
@@ -138,7 +142,7 @@ static int link_process_incoming_data(const char* data, size_t size)
                     
                     // Handle as regular command callback
                     if (link_callbacks.cmd_cb) {
-                        link_callbacks.cmd_cb(cmd_pkt->cmd_id,  cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
+                        link_callbacks.cmd_cb(cmd_pkt->cmd_id, cmd_pkt->subcmd_id, cmd_pkt->data, cmd_pkt->size);
                     } else {
                         ERROR("No command callback registered");
                     }
@@ -213,18 +217,21 @@ int link_init(link_role_t is_gs)
         close(link_ctx.listen_sockfd);
         close(link_ctx.send_sockfd);
         return -1;
+    } else {
+        DEBUG("Listener socket bound to port %d", link_ctx.listener_port);
     }
 
     // --- Configure and bind sender socket ---
     memset(&link_ctx.sender_addr, 0, sizeof(link_ctx.sender_addr));
     link_ctx.sender_addr.sin_family = AF_INET;
     inet_pton(AF_INET, is_gs == LINK_GROUND_STATION ? LINK_DRONE_IP : LINK_GS_IP, &link_ctx.sender_addr.sin_addr);
-    link_ctx.sender_addr.sin_port = htons(link_ctx.listener_port);
+    link_ctx.sender_addr.sin_port = htons(LINK_PORT_RX);
 
-    INFO("UDP sockets initialized and bound to port L:%d", link_ctx.listener_port);
+    INFO("UDP sockets initialized and bound to port L:%d", link_ctx.sender_addr.sin_port);
     INFO("Start listener thread");
 
     // Start listener thread
+    run = true;
     if (pthread_create(&link_listener_thread, NULL, link_listener_thread_func, NULL) != 0) {
         PERROR("Failed to create listener thread");
         close(link_ctx.listen_sockfd);
@@ -344,6 +351,12 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
         return -1;
     }
 
+    // Check for maximum packet size to prevent "Invalid argument" error
+    if (size > sizeof(((link_command_pkt_t*)0)->data)) {
+        ERROR("Command data size %zu exceeds maximum allowed %zu", size, sizeof(((link_command_pkt_t*)0)->data));
+        return -1;
+    }
+
     link_command_pkt_t cmd_pkt;
     cmd_pkt.header.type = PKT_CMD;
     cmd_pkt.header.size = size + sizeof(link_command_pkt_t) - sizeof(link_packet_header_t) - sizeof(cmd_pkt.data);
@@ -355,9 +368,10 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
         memcpy(cmd_pkt.data, data, size);
     }
 
-    uint32_t cmd_size = cmd_pkt.header.size + sizeof(link_packet_header_t);
+    // Calculate actual packet size more accurately
+    size_t actual_packet_size = sizeof(link_packet_header_t) + sizeof(cmd_pkt.cmd_id) + sizeof(cmd_pkt.subcmd_id) + sizeof(cmd_pkt.size) + size;
 
-    ssize_t sent = sendto(link_ctx.send_sockfd, &cmd_pkt, cmd_size, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, &cmd_pkt, actual_packet_size, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send command packet");
         return -1;
@@ -474,3 +488,6 @@ void link_register_cmd_rx_cb(cmd_rx_cb_t cb)
     link_callbacks.cmd_cb = cb;
     INFO("Command callback registered");
 }
+
+#undef ENABLE_DEBUG
+#define ENABLE_DEBUG 0

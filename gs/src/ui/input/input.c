@@ -12,6 +12,8 @@
 #include "input.h"
 #include "main_menu.h"
 
+#include "link_callbacks.h"
+
 /* Test powkiddy x55 joystick support to operate cursor */
 #define USE_JOYSTICK 0
 #define DEBUG_INPUT 0
@@ -68,6 +70,10 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
                 case KEYPAD_BUTTON_START:
                     data->key = LV_KEY_HOME;
                     break;
+                case KEYPAD_BUTTON_Y:
+                    /* Pass through to link switch cameras */
+                    // TODO: call handler directly here later
+                    break;
                 default:
                     return; // Don't process unhandled buttons
                     break;
@@ -78,6 +84,9 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
                 // Handle menu toggle with START button
                 if (event.number == KEYPAD_BUTTON_START) {
                     main_menu_toggle();
+                }
+                if (event.number == KEYPAD_BUTTON_Y) {
+                    link_switch_cameras();
                 }
             } else { // Button released
                 data->state = LV_INDEV_STATE_RELEASED;

@@ -83,6 +83,7 @@ typedef enum {
     LINK_SUBCMD_GOP,
     LINK_SUBCMD_PAYLOAD_SIZE,
     LINK_SUBCMD_VBR,
+    LINK_SUBCMD_SWITCH_CAMERAS,
     LINK_SUBCMD_CODEC,
 } link_subcommand_id_t;
 
