@@ -6,9 +6,8 @@
 #define CAMERA_USB_H
 
 #include "common.h"
-#include "camera.h"
 
-int camera_usb_init(camera_info_t* config, common_config_t* common_config);
+int camera_usb_init(common_config_t* config);
 void camera_usb_deinit(void);
 int camera_usb_bind_encoder(int cam_id, int enc_id);
 int camera_usb_unbind_encoder(int cam_id, int enc_id);

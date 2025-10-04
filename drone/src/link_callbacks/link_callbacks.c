@@ -4,9 +4,13 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <pthread.h>
+#include "camera/camera_manager.h"
+#include "common.h"
 
 static volatile bool running;
 static pthread_t telemetry_thread;
+extern common_config_t config;
+extern camera_manager_t camera_manager;
 
 
 void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size)
@@ -29,6 +33,23 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 // Respond with current WFB key
                 char wfb_key[64] = "my_wfb_key"; // Replace with actual key retrieval logic
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_WFB_KEY, wfb_key, strlen(wfb_key));
+            }
+            break;
+        case LINK_SUBCMD_SWITCH_CAMERAS:
+            if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(int)) {
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_SWITCH_CAMERAS, NULL, 0);
+                    break;
+                }
+                int camera_id = *(int*)data;
+                printf("Switching to camera ID: %d\n", camera_id);
+                camera_select_camera_by_idx(&camera_manager, &config, camera_id);
+                bool switch_success = true; // Replace with actual result
+                if (switch_success) {
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SWITCH_CAMERAS, NULL, 0);
+                } else {
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_SWITCH_CAMERAS, NULL, 0);
+                }
             }
             break;
         // Handle other commands...

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "common.h"
 
 #define MAX_CAMERA_NAME_LEN 64
 #define MAX_DEVICE_PATH_LEN 32
@@ -79,6 +80,17 @@ camera_info_t* camera_manager_get_next_available(camera_manager_t *manager, came
 
 void camera_manager_print_all(camera_manager_t *manager);
 int camera_manager_select_best(camera_manager_t *manager, camera_type_t preferred_type);
+
+int camera_select_camera_by_idx(camera_manager_t *manager, common_config_t *config, int index);
+int camera_select_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *next_camera);
+
+int camera_manager_init_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera);
+void camera_manager_deinit_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera);
+int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera);
+int camera_manager_unbind_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera);
+
+camera_info_t* camera_manager_get_current_camera(camera_manager_t *manager);
+
 
 // Utility functions for string conversion
 static inline const char* camera_type_to_string(camera_type_t type) {

@@ -160,6 +160,8 @@ int encoder_init(encoder_config_t *cfg)
     MPP_CHN_S stEncChn = {0};
     VENC_RC_PARAM_S rc_param = {0};
 
+    RK_MPI_SYS_Init();
+
     if (cfg == NULL || cfg->callback == NULL) {
         fprintf(stderr, "Encoder config or callback is NULL\n");
         return -1;

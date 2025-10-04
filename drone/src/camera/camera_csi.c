@@ -52,7 +52,7 @@ int camera_csi_init(camera_csi_config_t *cfg)
                                        cfg->light_inhibition_strength, cfg->light_inhibition_level);
     SAMPLE_COMM_ISP_SET_BackLight(cfg->cam_id, cfg->backlight_enable, cfg->backlight_strength);
 
-    RK_MPI_SYS_Init();
+    // RK_MPI_SYS_Init();
 
     VI_CHN_ATTR_S vi_chn_attr = {0};
     vi_chn_attr.pcVideoNode = "rkispp_scale0";

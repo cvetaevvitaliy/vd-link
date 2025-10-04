@@ -7,27 +7,28 @@
 #include <easymedia/rkmedia_api.h>
 #include <easymedia/rkmedia_vi.h>
 #include "common.h"
+#include "camera_manager.h"
 
-int camera_usb_init(camera_info_t* camera_info, common_config_t* common_config)
+// int camera_usb_init(camera_info_t* camera_info, common_config_t* common_config)
+int camera_usb_init(common_config_t* common_config)
 {
-    if (!camera_info || !common_config) {
-        printf("Camera USB config or common config is NULL\n");
+    if (!common_config) {
+        printf("Camera USB config is NULL\n");
         return -1;
     }
 
-    camera_usb_config_t* config = &common_config->camera_usb_config;
     int ret;
-    config->height = camera_info->supported_resolutions[0].height;
-    config->width = camera_info->supported_resolutions[0].width;
-
+    char device_path[20];
+    camera_usb_config_t* camera_usb_config = &common_config->camera_usb_config;
+    snprintf(device_path, sizeof(device_path), "/dev/video%d", camera_usb_config->device_index);
     printf("Initializing USB camera at %s with resolution %dx%d\n",
-           camera_info->device_path, config->width, config->height);
+           device_path, camera_usb_config->width, camera_usb_config->height);
 
     VI_CHN_ATTR_S vi_chn_attr = {0};
-    vi_chn_attr.pcVideoNode = camera_info->device_path;
+    vi_chn_attr.pcVideoNode = device_path;
     vi_chn_attr.u32BufCnt = 3;
-    vi_chn_attr.u32Width = config->width;
-    vi_chn_attr.u32Height = config->height;
+    vi_chn_attr.u32Width = camera_usb_config->width;
+    vi_chn_attr.u32Height = camera_usb_config->height;
     vi_chn_attr.enPixFmt = IMAGE_TYPE_YUYV422;
     vi_chn_attr.enWorkMode = VI_WORK_MODE_NORMAL;
     vi_chn_attr.enBufType = VI_CHN_BUF_TYPE_MMAP;
@@ -46,10 +47,10 @@ int camera_usb_init(camera_info_t* camera_info, common_config_t* common_config)
 
     RGA_ATTR_S rga_attr = {0};
     rga_attr.stImgIn.imgType = IMAGE_TYPE_YUYV422;
-    rga_attr.stImgIn.u32Width = config->width;
-    rga_attr.stImgIn.u32Height = config->height;
-    rga_attr.stImgIn.u32HorStride = config->width * 2; // YUYV has 2 bytes per pixel
-    rga_attr.stImgIn.u32VirStride = config->height;
+    rga_attr.stImgIn.u32Width = camera_usb_config->width;
+    rga_attr.stImgIn.u32Height = camera_usb_config->height;
+    rga_attr.stImgIn.u32HorStride = camera_usb_config->width * 2; // YUYV has 2 bytes per pixel
+    rga_attr.stImgIn.u32VirStride = camera_usb_config->height;
     rga_attr.stImgIn.u32X = 0;
     rga_attr.stImgIn.u32Y = 0;
     

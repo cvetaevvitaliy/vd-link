@@ -1,4 +1,5 @@
-#include "camera/camera.h"
+#include "camera/camera_manager.h"
+#include "common.h"
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
@@ -10,6 +11,8 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <stdbool.h>
+#include "camera/camera_csi.h"
+#include "camera/camera_usb.h"
 
 // Forward declarations
 static camera_sensor_t get_sensor_from_names(const char *driver, const char *card, 
@@ -30,6 +33,7 @@ static const struct {
     {"gc4663", SENSOR_GC4663, "gc4663", "gc4663", CAMERA_PRIORITY_MEDIUM, 75},
     {NULL, SENSOR_UNKNOWN, NULL, NULL, CAMERA_PRIORITY_FALLBACK, 0}
 };
+camera_info_t *current_camera = NULL;
 
 // Check if device exists in device tree
 // Check if device name matches ISP pipeline (should be filtered out)
@@ -327,6 +331,8 @@ static int camera_detect_usb(camera_info_t cameras[], int max_cameras) {
             camera_info_t info = {0};
             if (camera_test_v4l2_device(path, &info)) {
                 strncpy(info.device_path, path, sizeof(info.device_path) - 1);
+                // Extract device number from path like "/dev/video48" -> 48
+                sscanf(info.device_path, "/dev/video%d", &info.device_id);
                 all_devices[device_count] = info;
                 device_count++;
             }
@@ -343,8 +349,10 @@ static int camera_detect_usb(camera_info_t cameras[], int max_cameras) {
         int best_score = all_devices[i].num_resolutions;
         int best_device_num = 999;
         
-        // Extract device number from path like "/dev/video48" -> 48
-        sscanf(all_devices[i].device_path, "/dev/video%d", &best_device_num);
+        // sscanf(all_devices[i].device_path, "/dev/video%d", &best_device_num);
+        best_device_num = all_devices[i].device_id;
+        printf("Evaluating camera: %s (%s) - device id %d \n",
+               all_devices[i].name, all_devices[i].device_path, all_devices[i].device_id);
         
         // Check other devices with same bus_info
         for (int j = i + 1; j < device_count; j++) {
@@ -422,7 +430,7 @@ int camera_manager_init(camera_manager_t *manager) {
     
     // Auto-select best cameras
     camera_manager_select_best(manager, CAMERA_CSI);
-    
+
     return manager->count;
 }
 
@@ -629,4 +637,117 @@ void camera_manager_print_all(camera_manager_t *manager) {
     }
     
     printf("Legend: * = Primary camera, + = Secondary camera\n");
+}
+
+int camera_select_camera_by_idx(camera_manager_t *manager, common_config_t *config, int index)
+{
+    if (!manager || manager->count == 0 || index < 0 || index >= manager->count) {
+        return -1;
+    }
+
+    camera_info_t *next_camera = &manager->cameras[index];
+    return camera_select_camera(manager, config, next_camera);
+}
+
+int camera_select_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *next_camera)
+{
+    if (!manager || !next_camera) {
+        return -1;
+    }
+
+    if (!next_camera->is_available || !next_camera->supports_streaming) {
+        return -1;
+    }
+
+    if (current_camera) {
+        printf("Current camera before switch: %s (type %s)\n", 
+            current_camera ? current_camera->name : "None", 
+            current_camera ? camera_type_to_string(current_camera->type) : "N/A");
+
+        camera_manager_unbind_camera(manager, config, current_camera);
+        camera_manager_deinit_camera(manager, config, current_camera);
+    }
+    printf("Switching to camera: %s (type: %s)\n", next_camera->name, camera_type_to_string(next_camera->type));
+    camera_manager_init_camera(manager, config, next_camera);
+    camera_manager_bind_camera(manager, config, next_camera);
+
+    current_camera = next_camera;
+
+    return 0;
+}
+
+int camera_manager_init_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera)
+{
+    if (!manager || manager->count == 0 || !config || !camera) {
+        return -1;
+    }
+
+    if (camera->type == CAMERA_CSI) {
+        camera_csi_init(&config->camera_csi_config);
+    } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
+        if (config->camera_usb_config.height == 0 || config->camera_usb_config.width == 0) {
+            config->camera_usb_config.height = camera->supported_resolutions[0].height;
+            config->camera_usb_config.width = camera->supported_resolutions[0].width;
+        }
+        if (config->camera_usb_config.device_index <= 0) {
+            config->camera_usb_config.device_index = camera->device_id;
+        }
+        camera_usb_init(config);
+    }
+    printf("Initialized camera: %s (type: %s)\n", camera->name, camera_type_to_string(camera->type));
+
+    return 0;
+}
+
+void camera_manager_deinit_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera)
+{
+    if (!manager || manager->count == 0 || !config || !camera) {
+        return;
+    }
+
+    if (camera->type == CAMERA_CSI) {
+        camera_csi_unbind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
+        camera_csi_deinit(&config->camera_csi_config);
+    } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
+        camera_usb_unbind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);
+        camera_usb_deinit();
+    }
+}
+
+int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera)
+{
+    if (!manager || manager->count == 0 || !config || !camera) {
+        return -1;
+    }
+
+    if (camera->type == CAMERA_CSI) {
+        camera_csi_bind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
+    } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
+        camera_usb_bind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);
+    }
+
+    return 0;
+}
+
+int camera_manager_unbind_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera)
+{
+    if (!manager || manager->count == 0 || !config || !camera) {
+        return -1;
+    }
+
+    if (camera->type == CAMERA_CSI) {
+        camera_csi_unbind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
+    } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
+        camera_usb_unbind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);
+    }
+
+    return 0;
+}
+
+camera_info_t* camera_manager_get_current_camera(camera_manager_t *manager)
+{
+    if (!manager || !current_camera) {
+        return NULL;
+    }
+    return current_camera;
 }

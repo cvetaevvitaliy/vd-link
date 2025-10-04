@@ -117,7 +117,7 @@ add_executable(${PROJECT_NAME}
         src/encoder/encoder.c
         src/camera/camera_csi.c
         src/camera/camera_usb.c
-        src/camera/camera.c
+        src/camera/camera_manager.c
         src/rtp_streamer/rtp_streamer.c
         src/uart/uart.c
         src/msp-osd/msp_osd.c

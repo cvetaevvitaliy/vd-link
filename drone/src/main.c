@@ -16,13 +16,15 @@
 #include "rtp_streamer/rtp_streamer.h"
 #include "screensaver/screensaver.h"
 #include "link_callbacks/link_callbacks.h"
-#include "camera/camera.h"
+#include "camera/camera_manager.h"
 #include "camera/camera_csi.h"
 #include "camera/camera_usb.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 
 static volatile bool running = false;
+common_config_t config = {0}; // common configuration
+camera_manager_t camera_manager; // camera manager instance
 
 static void signal_handler(int sig)
 {
@@ -112,7 +114,7 @@ static void parse_args(int argc, char* argv[], common_config_t* config)
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    common_config_t config = {0}; // common configuration
+
     screensaver_nv12_t screensaver; // screensaver frame (if camera not available)
 
     // set defaults configs
@@ -159,7 +161,6 @@ int main(int argc, char *argv[])
     config.encoder_config.callback = rtp_streamer_push_frame; // register callback for encoded frames
 
     // Initialize camera manager and detect cameras
-    camera_manager_t camera_manager;
     int cameras_found = camera_manager_init(&camera_manager);
     if (cameras_found < 0) {
         printf("Failed to initialize camera manager\n");
@@ -169,22 +170,7 @@ int main(int argc, char *argv[])
 
     printf("Camera Manager: Found %d cameras\n", cameras_found);
     camera_manager_print_all(&camera_manager);
-    
     camera_info_t *primary_camera = camera_manager_get_primary(&camera_manager);
-    // camera_info_t *primary_camera = camera_manager_get_by_type(&camera_manager, CAMERA_THERMAL);
-    if (primary_camera) {
-        printf("Selected primary camera: %s (type: %s)\n", primary_camera->name, camera_type_to_string(primary_camera->type));
-        
-        if (primary_camera->type == CAMERA_CSI) {
-            camera_csi_init(&config.camera_csi_config);
-        } else if (primary_camera->type == CAMERA_USB || primary_camera->type == CAMERA_THERMAL) {
-            camera_usb_init(primary_camera, &config);
-        }
-    } else {
-        printf("No cameras detected\n");
-        config_cleanup(&config);
-        return -1;
-    }
 
     ret = rtp_streamer_init(&config);
     if (ret != 0) {
@@ -220,9 +206,18 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    /* Bind camera to encoder */
+    /* Init and bind camera to encoder */
+    ret = camera_select_camera(&camera_manager, &config, primary_camera);
+    if (ret != 0) {
+        printf("Failed to initialize primary camera\n");
+        encoder_clean();
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
+
     /*If no camera is detected, use screensaver */
-    if (!primary_camera) {
+    if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
         printf("No camera detected, using screensaver\n");
         if (screensaver_create_nv12_solid(config.stream_width, config.stream_height,
                                     0x10 /*Y black*/, 0x80 /*U*/, 0x80 /*V*/,
@@ -233,30 +228,22 @@ int main(int argc, char *argv[])
             config_cleanup(&config);
             return -1;
         }
-    } else if (primary_camera->type == CAMERA_CSI) {
-        camera_csi_bind_encoder(config.camera_csi_config.cam_id, 0 /* encoder id */);
-    } else if (primary_camera->type == CAMERA_USB || primary_camera->type == CAMERA_THERMAL) {
-        camera_usb_bind_encoder(config.camera_usb_config.device_index, 0 /* encoder id */);
     }
 
     running = true;
     while (running) {
-        if (!primary_camera) {
+        if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
             encoder_manual_push_frame(&config.encoder_config, screensaver.data, (int)screensaver.size_bytes);
         }
-        
         usleep(16 * 1000);
     }
 
     /* Deinit camera */
-    if (!primary_camera) {
+    if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
         screensaver_free(&screensaver);
-    } else if (primary_camera->type == CAMERA_CSI) {
-        camera_csi_unbind_encoder(config.camera_csi_config.cam_id, 0 /* encoder id */);
-        camera_csi_deinit(&config.camera_csi_config);
-    } else if (primary_camera->type == CAMERA_USB || primary_camera->type == CAMERA_THERMAL) {
-        camera_usb_unbind_encoder(config.camera_usb_config.device_index, 0 /* encoder id */);
-        camera_usb_deinit();
+    } else {
+        camera_manager_unbind_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
+        camera_manager_deinit_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
     }
 
     camera_csi_deinit(&config.camera_csi_config);
