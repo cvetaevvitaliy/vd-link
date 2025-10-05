@@ -171,7 +171,19 @@ static int link_process_incoming_data(const char* data, size_t size)
 
 int link_init(link_role_t is_gs)
 {
+#ifdef LINK_USE_WFB_NG_TUNNEL
+    // WFB-ng tunnel mode - use single port for both directions
     link_ctx.listener_port = LINK_PORT_RX;
+#else
+    // Direct port mode - configure ports based on role:
+    // Drone: listens on 5611 (commands from GS), sends to 5610 (data to GS)
+    // GS: listens on 5610 (data from drone), sends to 5611 (commands to drone)
+    if (is_gs == LINK_GROUND_STATION) {
+        link_ctx.listener_port = LINK_PORT_DATA;  // Listen for data from drone (5610)
+    } else {
+        link_ctx.listener_port = LINK_PORT_CMD;   // Listen for commands from GS (5611)
+    }
+#endif
 
     // Initialize synchronous command context
     if (pthread_mutex_init(&sync_cmd_ctx.mutex, NULL) != 0) {
@@ -224,10 +236,32 @@ int link_init(link_role_t is_gs)
     // --- Configure and bind sender socket ---
     memset(&link_ctx.sender_addr, 0, sizeof(link_ctx.sender_addr));
     link_ctx.sender_addr.sin_family = AF_INET;
+    
+#ifdef LINK_USE_WFB_NG_TUNNEL
+    // WFB-ng tunnel mode - use tunnel IPs and single port
     inet_pton(AF_INET, is_gs == LINK_GROUND_STATION ? LINK_DRONE_IP : LINK_GS_IP, &link_ctx.sender_addr.sin_addr);
     link_ctx.sender_addr.sin_port = htons(LINK_PORT_RX);
+#else
+    // Direct port mode - both drone and GS send to localhost (127.0.0.1)
+    inet_pton(AF_INET, "127.0.0.1", &link_ctx.sender_addr.sin_addr);
+    
+    // Configure target port based on role:
+    // Drone sends to GS on port 5610 (data port)
+    // GS sends to drone on port 5611 (command port)
+    if (is_gs == LINK_GROUND_STATION) {
+        link_ctx.sender_addr.sin_port = htons(LINK_PORT_CMD);   // GS sends commands to drone (5611)
+    } else {
+        link_ctx.sender_addr.sin_port = htons(LINK_PORT_DATA);  // Drone sends data to GS (5610)
+    }
+#endif
 
-    INFO("UDP sockets initialized and bound to port L:%d", link_ctx.sender_addr.sin_port);
+    INFO("UDP sockets initialized and bound - Listen port: %d, Send port: %d", 
+         link_ctx.listener_port, ntohs(link_ctx.sender_addr.sin_port));
+#ifdef LINK_USE_WFB_NG_TUNNEL
+    INFO("Using WFB-ng tunnel mode");
+#else
+    INFO("Using direct port mode");
+#endif
     INFO("Start listener thread");
 
     // Start listener thread

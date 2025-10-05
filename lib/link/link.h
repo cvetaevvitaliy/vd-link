@@ -10,9 +10,21 @@
 #include <stdint.h>
 // #include "detection_types.h"
 
-#define LINK_PORT_RX 6211
-#define LINK_GS_IP "10.5.0.2"
-#define LINK_DRONE_IP "10.5.0.1"
+// Uncomment to use WFB-ng tunnel mode, comment out for direct port mode
+// #define LINK_USE_WFB_NG_TUNNEL
+
+#ifdef LINK_USE_WFB_NG_TUNNEL
+    // WFB-ng tunnel mode - use tunnel IPs and single port
+    #define LINK_PORT_RX 6211
+    #define LINK_GS_IP "10.5.0.2"
+    #define LINK_DRONE_IP "10.5.0.1"
+#else
+    // Direct port mode - use localhost and separate ports for data/commands
+    #define LINK_PORT_DATA 5610    // Port for data communication (drone->GS)
+    #define LINK_PORT_CMD 5611     // Port for command communication (GS->drone)
+    #define LINK_GS_IP "127.0.0.1"
+    #define LINK_DRONE_IP "127.0.0.1"
+#endif
 #define DETECTION_OBJ_NUM_MAX_SIZE 64
 #define LINK_MAX_DISPLAYPORT_SIZE 1500
 
