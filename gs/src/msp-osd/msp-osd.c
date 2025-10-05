@@ -14,6 +14,7 @@
 #include <bits/pthreadtypes.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <time.h>
 #include "msp-osd.h"
 #include "msp/msp.h"
 #include "msp/msp_displayport.h"
@@ -31,6 +32,13 @@
 
 static pthread_t msp_thread;
 static atomic_int running = 0;
+static msp_state_t *global_msp_state = NULL;  // Global MSP state for external access
+
+// OSD data tracking
+static bool osd_data_received = false;
+static time_t last_osd_data_time = 0;
+static bool splash_displayed = true;
+#define OSD_TIMEOUT_SECONDS 3  // Show splash if no data for 3 seconds
 
 static char current_fc_variant[5];
 
@@ -134,6 +142,17 @@ static void msp_clear_screen(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
 }
 
+static void clear_all_osd_data(void)
+{
+    // Clear MSP character maps (the actual OSD data)
+    msp_clear_screen();
+    
+    // Clear overlay character map (includes splash and status info)
+    memset(overlay_character_map, 0, sizeof(overlay_character_map));
+    
+    DEBUG_PRINT("Cleared all OSD data\n");
+}
+
 static void clear_framebuffer(void)
 {
     if (fb_addr == NULL) {
@@ -142,6 +161,43 @@ static void clear_framebuffer(void)
     }
     // DJI has a backwards alpha channel - FF is transparent, 00 is opaque.
     memset(fb_addr, 0, OSD_WIDTH * OSD_HEIGHT * BYTES_PER_PIXEL);
+}
+
+static void show_splash_screen(void)
+{
+    if (!splash_displayed) {
+        // Clear overlay and show splash
+        memset(overlay_character_map, 0, sizeof(overlay_character_map));
+        display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
+        splash_displayed = true;
+        need_render_display();
+        DEBUG_PRINT("Showing OSD waiting splash\n");
+    }
+}
+
+static void hide_splash_screen(void)
+{
+    if (splash_displayed) {
+        // Clear the splash area in overlay
+        memset(overlay_character_map, 0, sizeof(overlay_character_map));
+        splash_displayed = false;
+        need_render_display();
+        DEBUG_PRINT("Hiding OSD waiting splash\n");
+    }
+}
+
+static void check_osd_timeout(void)
+{
+    time_t current_time = time(NULL);
+    
+    if (osd_data_received && (current_time - last_osd_data_time) > OSD_TIMEOUT_SECONDS) {
+        // OSD data has timed out, clear all OSD data and show splash again
+        DEBUG_PRINT("OSD timeout - clearing all OSD data and showing splash\n");
+        clear_all_osd_data();  // Clear all OSD data
+        show_splash_screen();   // Show waiting message
+        osd_data_received = false;
+        need_render_display();  // Force re-render
+    }
 }
 
 static void draw_character_map(display_info_t *display_info, void* restrict fb_addr, uint16_t character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y])
@@ -237,7 +293,8 @@ static void start_display(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
     memset(overlay_character_map, 0, sizeof(overlay_character_map));
 
-    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
+    // Show initial splash screen
+    show_splash_screen();
     msp_draw_complete();
 }
 
@@ -262,6 +319,16 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
 
 static void msp_callback(msp_msg_t *msp_message)
 {
+    // Check if this is displayport data
+    if (msp_message->cmd == MSP_CMD_DISPLAYPORT) {
+        // Mark that we received OSD data
+        osd_data_received = true;
+        last_osd_data_time = time(NULL);
+        
+        // Hide splash screen when we receive actual OSD data
+        hide_splash_screen();
+    }
+    
     displayport_process_message(display_driver, msp_message);
 }
 
@@ -360,6 +427,11 @@ static void* msp_osd_thread(void *arg)
     }
     printf("[ MSP OSD ] OSD frame size: %dx%d\n", OSD_WIDTH, OSD_HEIGHT);
 
+    // Initialize OSD tracking
+    osd_data_received = false;
+    last_osd_data_time = time(NULL);
+    splash_displayed = false;
+
     memset(current_fc_variant, 0, sizeof(current_fc_variant));
 
     toast_load_config();
@@ -374,8 +446,8 @@ static void* msp_osd_thread(void *arg)
     display_driver->draw_complete = &msp_draw_complete;
     display_driver->set_options = &msp_set_options;
 
-    msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
-    msp_state->cb = &msp_callback;
+    global_msp_state = calloc(1, sizeof(msp_state_t));
+    global_msp_state->cb = &msp_callback;
 
     load_fonts("btfl");
 
@@ -398,7 +470,10 @@ static void* msp_osd_thread(void *arg)
     msp_draw_complete();
 #endif
     while (atomic_load(&running)) {
-        // noting now
+        // Check for OSD timeout
+        check_osd_timeout();
+        
+        // Render if needed
         if(need_render) {
             render_display();
         }
@@ -408,7 +483,8 @@ static void* msp_osd_thread(void *arg)
     // wfb_status_link_stop();
 
     free(display_driver);
-    free(msp_state);
+    free(global_msp_state);
+    global_msp_state = NULL;
     free(fb_addr);
 
     close_all_fonts();
@@ -445,4 +521,47 @@ void msp_osd_stop(void)
     }
     atomic_store(&running, 0);
     pthread_join(msp_thread, NULL);
+}
+
+void msp_process_data_pack(const uint8_t *data, size_t size)
+{
+    if (!data || size == 0 || !global_msp_state) {
+        printf("[ MSP OSD ] Invalid data or MSP not initialized\n");
+        return;
+    }
+    
+    // Mark that we received some MSP data activity
+    last_osd_data_time = time(NULL);
+    
+    // Process each byte through the MSP state machine
+    for (size_t i = 0; i < size; i++) {
+        msp_error_e result = msp_process_data(global_msp_state, data[i]);
+        if (result != MSP_ERR_NONE) {
+            // Handle MSP errors if needed, but don't break processing
+            // as the next bytes might be valid
+        }
+    }
+}
+
+void msp_osd_clear_and_reset(void)
+{
+    if (!global_msp_state) {
+        printf("[ MSP OSD ] Not initialized\n");
+        return;
+    }
+    
+    printf("[ MSP OSD ] Clearing OSD and resetting to waiting state\n");
+    
+    // Clear all OSD data
+    clear_all_osd_data();
+    
+    // Show splash screen
+    show_splash_screen();
+    
+    // Reset state
+    osd_data_received = false;
+    last_osd_data_time = time(NULL);
+    
+    // Force re-render
+    need_render_display();
 }

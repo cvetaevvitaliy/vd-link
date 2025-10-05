@@ -14,6 +14,7 @@
 #define LINK_GS_IP "10.5.0.2"
 #define LINK_DRONE_IP "10.5.0.1"
 #define DETECTION_OBJ_NUM_MAX_SIZE 64
+#define LINK_MAX_DISPLAYPORT_SIZE 1500
 
 /* Protocol description 
     * 1. Link uses UDP sockets for communication
@@ -122,7 +123,7 @@ typedef struct {
 
 typedef struct {
     link_packet_header_t header;
-    char data[256];
+    char data[LINK_MAX_DISPLAYPORT_SIZE];
 } link_msp_displayport_pkt_t;
 
 typedef void (*detection_cmd_rx_cb_t)(const link_detection_box_t* results, size_t count);

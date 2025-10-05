@@ -1,6 +1,7 @@
 #include "link_callbacks.h"
 #include "log.h"
 #include "ui_interface.h"
+#include "msp-osd/msp-osd.h"
 
 static const char* module_name_str = "LINK_CB";
 
@@ -12,8 +13,7 @@ void update_displayport_cb(const char *data, size_t size)
     }
 
     // Forward the displayport data to the UI
-    INFO("Received displayport data of size %zu bytes", size);
-    //msp_process_data_pack((const uint8_t*)data, size);
+    msp_process_data_pack((const uint8_t*)data, size);
     //ui_update_displayport(data, size);
 }
 

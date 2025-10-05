@@ -289,6 +289,10 @@ int link_send_displayport(const char* data, size_t size)
         ERROR("No data to send for displayport");
         return -1;
     }
+    if (size > LINK_MAX_DISPLAYPORT_SIZE) {
+        ERROR("Displayport data size %zu exceeds maximum allowed %d", size, LINK_MAX_DISPLAYPORT_SIZE);
+        return -1;
+    }
     link_msp_displayport_pkt_t pkt;
     pkt.header.type = PKT_MSP_DISPLAYPORT;
     pkt.header.size = size;
