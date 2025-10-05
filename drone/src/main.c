@@ -19,8 +19,10 @@
 #include "camera/camera_manager.h"
 #include "camera/camera_csi.h"
 #include "camera/camera_usb.h"
+#include "fc_conn.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
+#define DEFAULT_SERIAL "/dev/ttyS0"
 
 static volatile bool running = false;
 common_config_t config = {0}; // common configuration
@@ -204,6 +206,12 @@ int main(int argc, char *argv[])
         rtp_streamer_deinit();
         config_cleanup(&config);
         return -1;
+    }
+
+    if (connect_to_fc(DEFAULT_SERIAL, 115200) != 0) {
+        printf("Failed to connect to flight controller\n");
+    } else {
+        register_msp_displayport_cb(link_send_displayport);
     }
 
     /* Init and bind camera to encoder */

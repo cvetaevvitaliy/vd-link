@@ -68,7 +68,7 @@ void send_telemetry_update_thread_fn(void)
         cpu_info = get_cpu_info();
         link_send_sys_telemetry(cpu_info.temperature_celsius, cpu_info.usage_percent);
         sleep(5); // Send telemetry every 5 seconds
-        printf("Telemetry sent: CPU Temp=%.2fC, CPU Usage=%.2f%%\n", cpu_info.temperature_celsius, cpu_info.usage_percent);
+        //printf("Telemetry sent: CPU Temp=%.2fC, CPU Usage=%.2f%%\n", cpu_info.temperature_celsius, cpu_info.usage_percent);
     }
     cpu_info = get_cpu_info();
     link_send_sys_telemetry(cpu_info.temperature_celsius, cpu_info.usage_percent);

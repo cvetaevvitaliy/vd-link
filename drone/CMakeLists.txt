@@ -110,6 +110,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/ini/src
 )
 
+add_subdirectory(src/msp)
 
 add_executable(${PROJECT_NAME}
         src/camera/isp/sample_common_isp.c
@@ -136,6 +137,7 @@ target_link_libraries(${PROJECT_NAME}
         msp
         ini
         link
+        fc_msp
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )
