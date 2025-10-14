@@ -285,6 +285,8 @@ static void render_screen(void)
 static void msp_draw_complete(void)
 {
     render_screen();
+    // Force UI to refresh when OSD updates
+    ui_force_refresh();
 }
 
 static void start_display(void)

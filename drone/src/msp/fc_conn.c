@@ -15,12 +15,16 @@
 #define OSD_DEFAULT_CHAR_Y    20//70
 #define FC_POLL_PERIOD_MSEC 2000
 #define FC_INACTIVE_TIMEOUT_MSEC 10000
-#define MSP_AGGREGATION_TIMEOUT_MSEC 500
+#define MSP_AGGREGATION_TIMEOUT_MSEC 1500
 
 #define MSEC_PER_SEC 1000
 #define NSEC_PER_MSEC 1000000
 #define SERIAL_POLL_RATE_HZ 5
 
+typedef struct  {
+    uint8_t* buffer;
+    uint16_t size;
+} aggregated_buffer_t;
 
 static uint64_t get_time_ms(void)
 {
@@ -37,12 +41,24 @@ static uint64_t last_fc_response = 0;
 static uint64_t last_msp_send = 0;
 static pthread_t fc_poll_thread;
 
-static uint8_t *aggregation_buffer = NULL;
+static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0}, {NULL, 0}};
+static uint8_t current_aggregation_buffer = 0;
 static uint16_t aggregation_mtu = 4048;
 static uint16_t aggregation_timeout = MSP_AGGREGATION_TIMEOUT_MSEC;
-static uint16_t aggregate_bytes = 0;
 static uint64_t last_aggregation_send = 0;
 
+aggregated_buffer_t* get_current_aggregation_buffer() {
+    return &aggregation_buffer[current_aggregation_buffer];
+}
+
+aggregated_buffer_t* get_previous_aggregation_buffer() {
+    return &aggregation_buffer[current_aggregation_buffer ^ 1];
+}
+
+void switch_aggregation_buffer() {
+    current_aggregation_buffer ^= 1;
+    aggregation_buffer[current_aggregation_buffer].size = 0;
+}
 
 void register_msp_displayport_cb(msp_displayport_cb_t cb)
 {
@@ -51,12 +67,18 @@ void register_msp_displayport_cb(msp_displayport_cb_t cb)
 
 static void send_aggregated_buffer()
 {
-    if (aggregation_buffer && aggregate_bytes > 0) {
-        ssize_t sent = displayport_cb(aggregation_buffer, aggregate_bytes);
+    if (get_current_aggregation_buffer()->buffer && get_current_aggregation_buffer()->size > 0) {
+        if (get_current_aggregation_buffer()->size == get_previous_aggregation_buffer()->size &&
+            memcmp(get_current_aggregation_buffer()->buffer, get_previous_aggregation_buffer()->buffer, get_current_aggregation_buffer()->size) == 0) {
+            // No change from last sent buffer, skip sending
+            switch_aggregation_buffer();
+            return;
+        }
+        ssize_t sent = displayport_cb(get_current_aggregation_buffer()->buffer, get_current_aggregation_buffer()->size);
         if (sent < 0) {
             printf("Error send data\n");
         }
-        aggregate_bytes = 0;
+        switch_aggregation_buffer();
     }
     last_aggregation_send = get_time_ms();
 }
@@ -102,17 +124,17 @@ static void rx_msp_callback(msp_msg_t *msp_message)
         if (msp_message->cmd == MSP_CMD_DISPLAYPORT &&
             msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN && size < 8) {
 
-            memcpy(aggregation_buffer + aggregate_bytes, message_buffer, size);
-            aggregate_bytes += size;
+            memcpy(get_current_aggregation_buffer()->buffer + get_current_aggregation_buffer()->size, message_buffer, size);
+            get_current_aggregation_buffer()->size += size;
 
             send_aggregated_buffer();
         } else {
-            if (aggregate_bytes + size >= aggregation_mtu) {
+            if (get_current_aggregation_buffer()->size + size >= aggregation_mtu) {
                 send_aggregated_buffer();
             }
 
-            memcpy(aggregation_buffer + aggregate_bytes, message_buffer, size);
-            aggregate_bytes += size;
+            memcpy(get_current_aggregation_buffer()->buffer + get_current_aggregation_buffer()->size, message_buffer, size);
+            get_current_aggregation_buffer()->size += size;
         }
     }
 
@@ -135,7 +157,8 @@ static void* fc_polling_thread(void *arg)
     uint8_t osd_size_y = OSD_DEFAULT_CHAR_Y;
     ssize_t serial_data_size;
     uint8_t serial_data[1024] = {0};
-    aggregation_buffer = malloc(aggregation_mtu);
+    aggregation_buffer[0].buffer = malloc(aggregation_mtu);
+    aggregation_buffer[1].buffer = malloc(aggregation_mtu);
 
     send_display_size(osd_size_x, osd_size_y);
     printf("FC inactive, sending display size %d x %d\n", osd_size_x, osd_size_y);
@@ -160,7 +183,7 @@ static void* fc_polling_thread(void *arg)
             last_fc_poll_time = now;
         }
 
-        if (aggregate_bytes > 0 && (now - last_aggregation_send >= aggregation_timeout)) {
+        if (get_current_aggregation_buffer()->size > 0 && (now - last_aggregation_send >= aggregation_timeout)) {
             send_aggregated_buffer();
         }
 

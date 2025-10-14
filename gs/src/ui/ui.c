@@ -36,6 +36,14 @@ static pthread_t tick_tid;
 static int tick_running = 1;
 static _Atomic int ui_init_done = 0;
 static void *fb_addr = NULL;
+static lv_timer_t *refresh_timer = NULL;
+static pthread_mutex_t lvgl_mutex = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int refresh_pending = 0;
+
+static void refresh_timer_cb(lv_timer_t *timer) {
+    lv_tick_inc(100);
+    lv_timer_handler();
+}
 
 static void *tick_thread(void *arg)
 {
@@ -52,10 +60,19 @@ static void *tick_thread(void *arg)
         clock_gettime(CLOCK_MONOTONIC, &now);
         int ms = (int)(now.tv_sec - prev.tv_sec) * 1000 + (now.tv_nsec - prev.tv_nsec) / 1000000;
         if (ms > 0) {
+            pthread_mutex_lock(&lvgl_mutex);
             lv_tick_inc(ms);
+            
+            // Handle pending refresh requests safely
+            if (atomic_load(&refresh_pending)) {
+                lv_obj_invalidate(lv_scr_act());
+                atomic_store(&refresh_pending, 0);
+            }
+            
+            lv_timer_handler();
+            pthread_mutex_unlock(&lvgl_mutex);
             prev = now;
         }
-        lv_timer_handler();
         usleep(1000);
     }
 
@@ -78,6 +95,7 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
 
     uint8_t *fb = (uint8_t *)fb_addr;
 
+    // Draw UI on top of OSD/video background
     for (int32_t y = 0; y < h; y++) {
         for (int32_t x = 0; x < w; x++) {
             lv_color32_t color = px_map[y * w + x];
@@ -104,36 +122,27 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
         }
     }
 
-    // Squash OSD framebuffer with LVGL framebuffer
+    // Also push UI changes immediately when UI updates, but blend with current OSD
     void *osd_buf = msp_osd_get_fb_addr();
-    if (osd_buf == NULL) {
-        // push only LVGL framebuffer if OSD is not available
-        drm_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
-        return;
+    if (osd_buf) {
+        rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT, RK_FORMAT_BGRA_8888);
+        rga_buffer_t dst = wrapbuffer_virtualaddr(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT, RK_FORMAT_BGRA_8888);
+        
+        IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_DST_OVER);
+        if (ret != IM_STATUS_SUCCESS) {
+            ERROR("RGA: imblend failed: %d\n", ret);
+        }
     }
-    void *dst_buf = fb_addr;
-
-    int width = LVGL_BUFF_WIDTH;
-    int height = LVGL_BUFF_HEIGHT;
-
-    rga_buffer_t src_osd = wrapbuffer_virtualaddr(osd_buf,  width, height, RK_FORMAT_BGRA_8888);
-    rga_buffer_t dst = wrapbuffer_virtualaddr(dst_buf,  width, height, RK_FORMAT_BGRA_8888);
-
-    IM_STATUS ret = imblend(src_osd, dst, IM_ALPHA_BLEND_DST_OVER);
-
-    if (ret != IM_STATUS_SUCCESS) {
-        ERROR("RGA: imblend failed: %d\n", ret);
-    }
-
-    // Push the new squashed frame to DRM
     drm_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
+    lv_display_flush_ready(disp);
 }
 
-void drm_osd_frame_done_cb(void)
+void ui_force_refresh(void)
 {
-    // memset(lvgl_buf1, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
-    // memset(lvgl_buf2, 0x00, LVGL_BUFF_WIDTH * LVGL_BUFF_HEIGHT * 4);
-    lv_display_flush_ready(disp);
+    // Set flag to request refresh from tick thread
+    if (atomic_load(&ui_init_done)) {
+        atomic_store(&refresh_pending, 1);
+    }
 }
 
 static void wfb_status_link_callback(const wfb_rx_status *st)
@@ -181,8 +190,6 @@ int ui_init(struct config_t *cfg)
     printf("[ UI ] Initialized LVGL display with size %dx%d\n", LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
 
     lv_display_set_flush_cb(disp, ui_flush_cb);
-
-    drm_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 
     lang_set_english();
 

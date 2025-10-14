@@ -26,5 +26,6 @@ LV_FONT_DECLARE(montserrat_cyrillic_48);
 
 int ui_init(struct config_t *cfg);
 void ui_deinit(void);
+void ui_force_refresh(void);
 
 #endif //UI_H
