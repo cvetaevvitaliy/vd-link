@@ -767,14 +767,14 @@ RK_S32 SAMPLE_COMMON_ISP_SET_Flicker(RK_S32 CamId, RK_U8 u32Flicker)
         if (u32Flicker == 0) // NTSC(60HZ)
         {
             ret = rk_aiq_uapi_setExpPwrLineFreqMode(g_aiq_ctx[CamId], EXP_PWR_LINE_FREQ_60HZ);
-            info.mode = OP_MANUAL;
-            info.fps = 30;
+            info.mode = OP_AUTO;
+            info.fps = 0;
             ret |= rk_aiq_uapi_setFrameRate(g_aiq_ctx[CamId], info);
         } else if (u32Flicker == 1) // PAL(50HZ)
         {
             ret = rk_aiq_uapi_setExpPwrLineFreqMode(g_aiq_ctx[CamId], EXP_PWR_LINE_FREQ_50HZ);
-            info.mode = OP_MANUAL;
-            info.fps = 25;
+            info.mode = OP_AUTO;
+            info.fps = 0;
             ret |= rk_aiq_uapi_setFrameRate(g_aiq_ctx[CamId], info);
         }
     }
