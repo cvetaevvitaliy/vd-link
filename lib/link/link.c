@@ -42,6 +42,7 @@ typedef struct {
     sys_telemetry_cmd_rx_cb_t sys_telemetry_cb;
     displayport_cmd_rx_cb_t displayport_cb;
     cmd_rx_cb_t cmd_cb;
+    rc_cmd_rx_cb_t rc_cb;
 } link_callbacks_t;
 
 static const char* module_name_str = "LINK";
@@ -161,6 +162,16 @@ static int link_process_incoming_data(const char* data, size_t size)
                 }
             }
             break;
+        case PKT_RC:
+            {
+                // Handle RC data
+                link_rc_pkt_t* rc_pkt = (link_rc_pkt_t*)data;
+                if (link_callbacks.rc_cb) {
+                    link_callbacks.rc_cb(rc_pkt->ch_values, rc_pkt->ch_cnt);
+                } else {
+                    ERROR("No RC callback registered");
+                }
+            }
         default:
             ERROR("Unknown packet type: %d", header->type);
             return -1;
@@ -505,6 +516,29 @@ int link_send_cmd_sync(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id,
     return result;
 }
 
+int link_send_rc(const uint16_t* channel_values, size_t channel_count)
+{
+    if (channel_values == NULL || channel_count == 0 || channel_count > LINK_MAX_RC_CH_NUM) {
+        ERROR("Invalid channel values or count for RC packet");
+        return -1;
+    }
+
+    link_rc_pkt_t rc_pkt;
+    rc_pkt.header.type = PKT_RC;
+    rc_pkt.header.size = sizeof(uint8_t) + sizeof(uint16_t) * channel_count; // ch_cnt + ch_values
+    rc_pkt.ch_cnt = (uint8_t)channel_count;
+    memcpy(rc_pkt.ch_values, channel_values, sizeof(uint16_t) * channel_count);
+
+    ssize_t sent = sendto(link_ctx.send_sockfd, &rc_pkt, sizeof(link_packet_header_t) + rc_pkt.header.size, 0,
+                          (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    if (sent < 0) {
+        PERROR("Failed to send RC packet");
+        return -1;
+    }
+
+    return 0;
+}
+
 
 void link_register_detection_rx_cb(detection_cmd_rx_cb_t cb)
 {
@@ -525,6 +559,12 @@ void link_register_cmd_rx_cb(cmd_rx_cb_t cb)
 {
     link_callbacks.cmd_cb = cb;
     INFO("Command callback registered");
+}
+
+void link_register_rc_rx_cb(rc_cmd_rx_cb_t cb)
+{
+    link_callbacks.rc_cb = cb;
+    INFO("RC callback registered");
 }
 
 #undef ENABLE_DEBUG

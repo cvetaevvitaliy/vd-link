@@ -451,7 +451,7 @@ static void* msp_osd_thread(void *arg)
     global_msp_state = calloc(1, sizeof(msp_state_t));
     global_msp_state->cb = &msp_callback;
 
-    load_fonts("btfl");
+    load_fonts("ardu"); 
 
     start_display();
     usleep(100000);

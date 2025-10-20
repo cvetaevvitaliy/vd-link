@@ -60,6 +60,16 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
     }
 }
 
+void link_rc_rx_callback(const uint16_t* channel_values, size_t channel_count)
+{
+    // Handle received RC channel values
+    printf("Received RC channel values:\n");
+    for (size_t i = 0; i < channel_count; ++i) {
+        printf(" Channel %zu: %d ", i, channel_values[i]);
+    }
+    printf("\n");
+}
+
 void send_telemetry_update_thread_fn(void)
 {
     cpu_info_t cpu_info;

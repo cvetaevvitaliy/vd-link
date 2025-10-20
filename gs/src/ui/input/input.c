@@ -40,6 +40,7 @@ static const char* button_names[] = {
 static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
 {
     struct js_event event;
+    static int last_axis_values[4] = {0, 0, 0, 0}; // For axes 0-3
 
     // Initialize data to default state
     data->state = LV_INDEV_STATE_RELEASED;
@@ -98,6 +99,11 @@ static void keyboard_read(lv_indev_t * indev, lv_indev_data_t * data)
                     data->state == LV_INDEV_STATE_PRESSED ? "PRESSED" : "RELEASED");
             }
 #endif
+        } else if (event.type == JS_EVENT_AXIS) {
+            /* Joystick axis has range [-32767, 32767]. We need to save normalized values in the range [1000, 2000] */
+            last_axis_values[event.number] = (event.value + 32767) * 1000 / 65534 + 1000;
+            printf("Axis %d moved to %d\n", event.number, last_axis_values[event.number]);
+            link_send_rc((uint16_t*)last_axis_values, 4);
         }
     }
 }

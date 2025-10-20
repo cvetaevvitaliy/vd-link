@@ -198,6 +198,8 @@ int main(int argc, char *argv[])
         return -1;
     }
     link_register_cmd_rx_cb(link_cmd_rx_callback);
+    link_register_rc_rx_cb(link_rc_rx_callback);
+
     // Start telemetry thread
     ret = link_start_telemetry_thread();
     if (ret != 0) {
