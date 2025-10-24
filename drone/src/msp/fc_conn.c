@@ -14,7 +14,7 @@
 #define OSD_DEFAULT_CHAR_X    53//93
 #define OSD_DEFAULT_CHAR_Y    20//70
 #define FC_POLL_PERIOD_MSEC 2000
-#define FC_INACTIVE_TIMEOUT_MSEC 10000
+#define FC_INACTIVE_TIMEOUT_MSEC 1000
 #define MSP_AGGREGATION_TIMEOUT_MSEC 1500
 
 #define MSEC_PER_SEC 1000
@@ -43,9 +43,10 @@ static pthread_t fc_poll_thread;
 
 static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0}, {NULL, 0}};
 static uint8_t current_aggregation_buffer = 0;
-static uint16_t aggregation_mtu = 4048;
+static uint16_t aggregation_mtu = 1400; // Default MTU
 static uint16_t aggregation_timeout = MSP_AGGREGATION_TIMEOUT_MSEC;
 static uint64_t last_aggregation_send = 0;
+static uint8_t need_request_fc = 0;
 
 aggregated_buffer_t* get_current_aggregation_buffer() {
     return &aggregation_buffer[current_aggregation_buffer];
@@ -56,6 +57,7 @@ aggregated_buffer_t* get_previous_aggregation_buffer() {
 }
 
 void switch_aggregation_buffer() {
+    memset(get_current_aggregation_buffer()->buffer, 0, get_current_aggregation_buffer()->size);
     current_aggregation_buffer ^= 1;
     aggregation_buffer[current_aggregation_buffer].size = 0;
 }
@@ -84,20 +86,20 @@ static void send_aggregated_buffer()
 }
 
 static void send_display_size(uint8_t canvas_size_x, uint8_t canvas_size_y) {
-    uint8_t buffer[8];
+    uint8_t buffer[256];
     uint8_t payload[2] = {canvas_size_x, canvas_size_y};
     construct_msp_command(buffer, MSP_CMD_SET_OSD_CANVAS, payload, 2, MSP_OUTBOUND);
     write(serial_fd, &buffer, sizeof(buffer));
 }
 
 static void send_variant_request() {
-    uint8_t buffer[6];
+    uint8_t buffer[256];
     construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
     write(serial_fd, &buffer, sizeof(buffer));
 }
 
 static void send_version_request() {
-    uint8_t buffer[6];
+    uint8_t buffer[256];
     construct_msp_command(buffer, MSP_CMD_API_VERSION, NULL, 0, MSP_OUTBOUND);
     write(serial_fd, &buffer, sizeof(buffer));
 }
@@ -121,13 +123,21 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             printf("Error sending data\n");
         }
     } else {
-        if (msp_message->cmd == MSP_CMD_DISPLAYPORT &&
-            msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN && size < 8) {
+        if (msp_message->cmd == MSP_CMD_DISPLAYPORT) {
 
             memcpy(get_current_aggregation_buffer()->buffer + get_current_aggregation_buffer()->size, message_buffer, size);
             get_current_aggregation_buffer()->size += size;
 
             send_aggregated_buffer();
+            if (msp_message->cmd == MSP_CMD_DISPLAYPORT &&
+                msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN &&
+                need_request_fc == 1) {
+                send_version_request();
+                send_variant_request();
+                send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+                printf("FC inactive, sending display size %d x %d\n", OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+                need_request_fc = 0;
+    }
         } else {
             if (get_current_aggregation_buffer()->size + size >= aggregation_mtu) {
                 send_aggregated_buffer();
@@ -160,8 +170,8 @@ static void* fc_polling_thread(void *arg)
     aggregation_buffer[0].buffer = malloc(aggregation_mtu);
     aggregation_buffer[1].buffer = malloc(aggregation_mtu);
 
-    send_display_size(osd_size_x, osd_size_y);
-    printf("FC inactive, sending display size %d x %d\n", osd_size_x, osd_size_y);
+    // send_display_size(osd_size_x, osd_size_y);
+    // printf("FC inactive, sending display size %d x %d\n", osd_size_x, osd_size_y);
 
     while (!quit) {
         poll_fds[0].fd = serial_fd;
@@ -171,13 +181,14 @@ static void* fc_polling_thread(void *arg)
         // printf("POLL now %llu  last %llu \n", now, last_fc_poll_time);
 
         if (now - last_fc_poll_time >= FC_POLL_PERIOD_MSEC) {
-            send_version_request();
-            send_variant_request();
+            // send_version_request();
+            // send_variant_request();
             // printf("FC poll request sent\n");
 
             if (now - last_fc_response >= FC_INACTIVE_TIMEOUT_MSEC) {
-                send_display_size(osd_size_x, osd_size_y);
-                printf("FC inactive, sending display size %d x %d\n", osd_size_x, osd_size_y);
+                // send_display_size(osd_size_x, osd_size_y);
+                // printf("FC inactive, sending display size %d x %d\n", osd_size_x, osd_size_y);
+                need_request_fc = 1;
             }
 
             last_fc_poll_time = now;
