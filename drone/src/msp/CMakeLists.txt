@@ -4,8 +4,8 @@ set(CMAKE_C_STANDARD 99)
 
 add_library(fc_msp STATIC
     msp.c
-    serial.c
     fc_conn.c
+    msp_interface.c
 )
 
 target_include_directories(msp PUBLIC

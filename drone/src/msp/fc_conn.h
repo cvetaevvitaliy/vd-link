@@ -1,4 +1,3 @@
-#include "serial.h"
 #include "msp.h"
 #include <stdlib.h>
 
