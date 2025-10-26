@@ -233,10 +233,7 @@ static int link_process_incoming_data(const char* data, size_t size)
                 // Handle system telemetry
                 // DEBUG("Received system telemetry");
                 link_sys_telemetry_pkt_t* telemetry_pkt = (link_sys_telemetry_pkt_t*)data;
-                link_sys_telemetry_t telemetry = {
-                    .cpu_temperature = telemetry_pkt->telemetry.cpu_temperature,
-                    .cpu_usage_percent = telemetry_pkt->telemetry.cpu_usage_percent
-                };
+                link_sys_telemetry_t telemetry = telemetry_pkt->telemetry;
                 if (link_callbacks.sys_telemetry_cb) {
                     link_callbacks.sys_telemetry_cb(&telemetry);
                 } else {

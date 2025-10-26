@@ -180,7 +180,7 @@ typedef struct {
 
 typedef void (*detection_cmd_rx_cb_t)(const link_detection_box_t* results, size_t count);
 typedef void (*sys_telemetry_cmd_rx_cb_t)(const link_sys_telemetry_t* telemetry);
-typedef void (*displayport_cmd_rx_cb_t)(const char* data, size_t size);
+typedef void (*displayport_cmd_rx_cb_t)(const unsigned char* data, size_t size);
 typedef void (*cmd_rx_cb_t)(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
 typedef void (*rc_cmd_rx_cb_t)(const uint16_t* channel_values, size_t channel_count);
 

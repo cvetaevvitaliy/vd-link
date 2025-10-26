@@ -75,7 +75,7 @@ void link_rc_rx_callback(const uint16_t* channel_values, size_t channel_count)
 void send_telemetry_update_thread_fn(void)
 {
     cpu_info_t cpu_info;
-    struct lte_signal_info lte_info;
+    struct lte_signal_info lte_info = {0};
 
     while (running) {
         cpu_info = get_cpu_info();
@@ -87,6 +87,9 @@ void send_telemetry_update_thread_fn(void)
 
         if (current_transport_method == TRANSPORT_METHOD_CELLULAR) {
             lte_modem_get_signal_info(&lte_info);
+            // char buf[1280];
+            // lte_modem_get_signal_str(buf, sizeof(buf));
+            // printf("LTE Modem Signal Info: %s\n", buf);
         }
 
         switch (current_transport_method) {
