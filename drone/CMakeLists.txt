@@ -100,6 +100,8 @@ if(RKAIQ_FOUND)
     endif()
 endif()
 
+pkg_check_modules(JSON-C REQUIRED json-c)
+
 include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -126,6 +128,8 @@ add_executable(${PROJECT_NAME}
         src/screensaver/screensaver.c
         src/link_callbacks/link_callbacks.c
         src/hal/cpuinfo.c
+        src/hal/lte_modem.c
+        src/hal/transport.c
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -138,6 +142,7 @@ target_link_libraries(${PROJECT_NAME}
         ini
         link
         fc_msp
+        ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )

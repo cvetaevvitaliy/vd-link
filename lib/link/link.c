@@ -6,16 +6,87 @@
 #include "link.h"
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <pthread.h>
 #include <stdbool.h>
-#include <sys/time.h>
-#include <errno.h>
+
+/* Cross-platform includes */
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <windows.h>
+    #include <time.h>
+    #include <errno.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    /* Unix/Linux/macOS includes */
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    #include <pthread.h>
+    #include <sys/time.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <errno.h>
+#endif
+
+#define MODULE_NAME_STR "LINK"
 #include "log.h"
 
 #undef ENABLE_DEBUG
 #define ENABLE_DEBUG 0
+
+/* Cross-platform definitions */
+#ifdef _WIN32
+    /* Windows socket compatibility */
+    #define close(s) closesocket(s)
+    #define ssize_t int
+    typedef int socklen_t;
+    
+    /* Windows error codes compatibility */
+    #ifndef EINTR
+        #define EINTR WSAEINTR
+    #endif
+    
+    /* Time structures for Windows */
+    #ifndef _TIMESPEC_DEFINED
+        #define _TIMESPEC_DEFINED
+        struct timespec {
+            time_t tv_sec;
+            long tv_nsec;
+        };
+    #endif
+    
+    #ifndef _TIMEVAL_DEFINED
+        #define _TIMEVAL_DEFINED
+        struct timeval {
+            long tv_sec;
+            long tv_usec;
+        };
+    #endif
+    
+    /* Windows pthread alternative */
+    #define pthread_t HANDLE
+    #define pthread_mutex_t CRITICAL_SECTION
+    #define pthread_cond_t CONDITION_VARIABLE
+    #define pthread_create(thread, attr, start_routine, arg) \
+        ((*thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)start_routine, arg, 0, NULL)) == NULL ? -1 : 0)
+    #define pthread_join(thread, retval) \
+        (WaitForSingleObject(thread, INFINITE) == WAIT_OBJECT_0 ? 0 : -1)
+    #define pthread_mutex_init(mutex, attr) \
+        (InitializeCriticalSection(mutex), 0)
+    #define pthread_mutex_destroy(mutex) \
+        (DeleteCriticalSection(mutex))
+    #define pthread_mutex_lock(mutex) \
+        (EnterCriticalSection(mutex), 0)
+    #define pthread_mutex_unlock(mutex) \
+        (LeaveCriticalSection(mutex), 0)
+    #define pthread_cond_init(cond, attr) \
+        (InitializeConditionVariable(cond), 0)
+    #define pthread_cond_destroy(cond) \
+        ((void)(cond))
+    #define pthread_cond_signal(cond) \
+        (WakeConditionVariable(cond))
+    #define pthread_cond_timedwait(cond, mutex, abstime) \
+        win32_cond_timedwait(cond, mutex, abstime)
+#endif
 
 typedef struct {
     bool waiting;
@@ -54,6 +125,49 @@ static sync_cmd_ctx_t sync_cmd_ctx = {0};
 
 static int link_process_incoming_data(const char* data, size_t size);
 
+#ifdef _WIN32
+/* Windows-specific utility functions */
+static int gettimeofday(struct timeval *tv, void *tz) {
+    FILETIME ft;
+    unsigned __int64 tmpres = 0;
+    
+    if (tv) {
+        GetSystemTimeAsFileTime(&ft);
+        tmpres |= ft.dwHighDateTime;
+        tmpres <<= 32;
+        tmpres |= ft.dwLowDateTime;
+        tmpres /= 10;
+        tmpres -= 11644473600000000ULL;
+        tv->tv_sec = (long)(tmpres / 1000000UL);
+        tv->tv_usec = (long)(tmpres % 1000000UL);
+    }
+    return 0;
+}
+
+/* Windows condition variable timedwait implementation */
+static int win32_cond_timedwait(CONDITION_VARIABLE *cond, CRITICAL_SECTION *mutex, const struct timespec *abstime) {
+    struct timeval now;
+    DWORD timeout_ms;
+    
+    gettimeofday(&now, NULL);
+    
+    long long now_ms = now.tv_sec * 1000 + now.tv_usec / 1000;
+    long long abs_ms = abstime->tv_sec * 1000 + abstime->tv_nsec / 1000000;
+    
+    if (abs_ms <= now_ms) {
+        return ETIMEDOUT;
+    }
+    
+    timeout_ms = (DWORD)(abs_ms - now_ms);
+    
+    if (SleepConditionVariableCS(cond, mutex, timeout_ms)) {
+        return 0;
+    } else {
+        return (GetLastError() == ERROR_TIMEOUT) ? ETIMEDOUT : -1;
+    }
+}
+#endif
+
 static void* link_listener_thread_func(void* arg)
 {
     (void)arg;
@@ -64,13 +178,26 @@ static void* link_listener_thread_func(void* arg)
         ssize_t bytes_received = recvfrom(link_ctx.listen_sockfd, buffer, sizeof(buffer), 0,
                                           (struct sockaddr*)&received_from_addr, &addr_len);
         if (bytes_received < 0) {
-            PERROR("recvfrom");
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error != WSAEINTR && error != WSAECONNRESET) {
+                ERROR("recvfrom failed with error: %d", error);
+            }
+#else
+            if (errno != EINTR) {
+                PERROR("recvfrom");
+            }
+#endif
             continue;
         }
         // Process the received data
         link_process_incoming_data(buffer, bytes_received);
     }
+#ifdef _WIN32
+    return 0;
+#else
     return NULL;
+#endif
 }
 
 static int link_process_incoming_data(const char* data, size_t size)
@@ -106,8 +233,12 @@ static int link_process_incoming_data(const char* data, size_t size)
                 // Handle system telemetry
                 // DEBUG("Received system telemetry");
                 link_sys_telemetry_pkt_t* telemetry_pkt = (link_sys_telemetry_pkt_t*)data;
+                link_sys_telemetry_t telemetry = {
+                    .cpu_temperature = telemetry_pkt->telemetry.cpu_temperature,
+                    .cpu_usage_percent = telemetry_pkt->telemetry.cpu_usage_percent
+                };
                 if (link_callbacks.sys_telemetry_cb) {
-                    link_callbacks.sys_telemetry_cb(telemetry_pkt->cpu_temperature, telemetry_pkt->cpu_usage_percent);
+                    link_callbacks.sys_telemetry_cb(&telemetry);
                 } else {
                     ERROR("No system telemetry callback registered");
                 }
@@ -182,6 +313,16 @@ static int link_process_incoming_data(const char* data, size_t size)
 
 int link_init(link_role_t is_gs)
 {
+#ifdef _WIN32
+    // Initialize Winsock
+    WSADATA wsaData;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (result != 0) {
+        ERROR("WSAStartup failed with error: %d", result);
+        return -1;
+    }
+#endif
+
 #ifdef LINK_USE_WFB_NG_TUNNEL
     // WFB-ng tunnel mode - use single port for both directions
     link_ctx.listener_port = LINK_PORT_RX;
@@ -309,6 +450,11 @@ void link_deinit(void)
     pthread_cond_destroy(&sync_cmd_ctx.cond);
     pthread_mutex_destroy(&sync_cmd_ctx.mutex);
     
+#ifdef _WIN32
+    // Cleanup Winsock
+    WSACleanup();
+#endif
+    
     INFO("Link deinitialized");
 }
 
@@ -319,7 +465,7 @@ int link_send_ack(uint32_t ack_id)
     header.size = sizeof(ack_id);
 
     // Send ACK packet
-    ssize_t sent = sendto(link_ctx.send_sockfd, &header, sizeof(header), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&header, sizeof(header), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send ACK packet");
         return -1;
@@ -343,7 +489,7 @@ int link_send_displayport(const char* data, size_t size)
     pkt.header.size = size;
     memcpy(pkt.data, data, size);
 
-    ssize_t sent = sendto(link_ctx.send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&pkt, sizeof(pkt), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send displayport packet");
         return -1;
@@ -366,7 +512,7 @@ int link_send_detection(const link_detection_box_t* results, size_t count)
     memcpy(packet.results, results, sizeof(link_detection_box_t) * count);
 
     // Send the packet over the network
-    ssize_t sent = sendto(link_ctx.send_sockfd, &packet, bytes, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&packet, bytes, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send detection packet");
         return -1;
@@ -375,16 +521,20 @@ int link_send_detection(const link_detection_box_t* results, size_t count)
     return 0;
 }
 
-int link_send_sys_telemetry(float cpu_temp, float cpu_usage)
+int link_send_sys_telemetry(const link_sys_telemetry_t* telemetry)
 {
+    if (telemetry == NULL) {
+        ERROR("No telemetry data to send");
+        return -1;
+    }
+
     link_sys_telemetry_pkt_t telemetry_pkt;
     telemetry_pkt.header.type = PKT_SYS_TELEMETRY;
     telemetry_pkt.header.size = sizeof(link_sys_telemetry_pkt_t) - sizeof(link_packet_header_t);
-    telemetry_pkt.cpu_temperature = cpu_temp;
-    telemetry_pkt.cpu_usage_percent = cpu_usage;
+    telemetry_pkt.telemetry = *telemetry;
 
     // Send the telemetry packet
-    ssize_t sent = sendto(link_ctx.send_sockfd, &telemetry_pkt, sizeof(telemetry_pkt), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&telemetry_pkt, sizeof(telemetry_pkt), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send system telemetry packet");
         return -1;
@@ -420,7 +570,7 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
     // Calculate actual packet size more accurately
     size_t actual_packet_size = sizeof(link_packet_header_t) + sizeof(cmd_pkt.cmd_id) + sizeof(cmd_pkt.subcmd_id) + sizeof(cmd_pkt.size) + size;
 
-    ssize_t sent = sendto(link_ctx.send_sockfd, &cmd_pkt, actual_packet_size, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&cmd_pkt, actual_packet_size, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send command packet");
         return -1;
@@ -529,7 +679,7 @@ int link_send_rc(const uint16_t* channel_values, size_t channel_count)
     rc_pkt.ch_cnt = (uint8_t)channel_count;
     memcpy(rc_pkt.ch_values, channel_values, sizeof(uint16_t) * channel_count);
 
-    ssize_t sent = sendto(link_ctx.send_sockfd, &rc_pkt, sizeof(link_packet_header_t) + rc_pkt.header.size, 0,
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&rc_pkt, sizeof(link_packet_header_t) + rc_pkt.header.size, 0,
                           (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send RC packet");

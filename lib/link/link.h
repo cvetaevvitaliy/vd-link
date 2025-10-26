@@ -133,10 +133,38 @@ typedef struct {
     char data[LINK_MAX_CMD_SIZE];
 } link_command_pkt_t;
 
+typedef enum {
+    LINK_PHY_TYPE_UNKNOWN = 0,
+    LINK_PHY_TYPE_ETHERNET,
+    LINK_PHY_TYPE_WIFI,
+    LINK_PHY_TYPE_LTE,
+    LINK_PHY_TYPE_WCDMA,
+    LINK_PHY_TYPE_LAST
+} link_phy_type_t;
+
 typedef struct {
-    link_packet_header_t header;
     float cpu_temperature;
     float cpu_usage_percent;
+    link_phy_type_t phy_type;
+    union {
+    struct {
+        long rssi;
+        long rsrq;
+        long rsrp;
+        double snr;
+    } lte_signal;
+    struct {
+        long rssi;
+    } wcdma_signal;
+    struct {
+        long rssi;
+    } wifi_signal;
+    };
+} link_sys_telemetry_t;
+
+typedef struct {
+    link_packet_header_t header;
+    link_sys_telemetry_t telemetry;
 } link_sys_telemetry_pkt_t;
 
 typedef struct {
@@ -151,7 +179,7 @@ typedef struct {
 } link_rc_pkt_t;
 
 typedef void (*detection_cmd_rx_cb_t)(const link_detection_box_t* results, size_t count);
-typedef void (*sys_telemetry_cmd_rx_cb_t)(float cpu_temp, float cpu_usage);
+typedef void (*sys_telemetry_cmd_rx_cb_t)(const link_sys_telemetry_t* telemetry);
 typedef void (*displayport_cmd_rx_cb_t)(const char* data, size_t size);
 typedef void (*cmd_rx_cb_t)(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
 typedef void (*rc_cmd_rx_cb_t)(const uint16_t* channel_values, size_t channel_count);
@@ -162,7 +190,7 @@ void link_deinit(void);
 int link_send_ack(uint32_t ack_id);
 int link_send_displayport(const char* data, size_t size);
 int link_send_detection(const link_detection_box_t* data, size_t count);
-int link_send_sys_telemetry(float cpu_temp, float cpu_usage);
+int link_send_sys_telemetry(link_sys_telemetry_t const* telemetry);
 int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
 int link_send_cmd_sync(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size, void* resp_data, size_t* resp_size, uint32_t timeout_ms);
 int link_send_rc(const uint16_t* channel_values, size_t channel_count);
