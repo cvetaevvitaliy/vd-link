@@ -51,6 +51,7 @@ static int wifi_network_count = 0;
 
 // Function prototypes
 static void show_password_dialog(const char* ssid);
+static void scroll_to_focused_item(void);
 
 // Асинхронне сканування мереж
 static pthread_t scan_thread;
@@ -171,6 +172,17 @@ static int scan_wifi_networks(void)
     pclose(fp);
     DEBUG("Found %d WiFi networks", wifi_network_count);
     return wifi_network_count;
+}
+
+// Auto-scroll to focused network item
+static void scroll_to_focused_item(void)
+{
+    if (current_column == 0 && left_focus >= 0 && left_focus < wifi_network_count) {
+        if (network_items[left_focus] && lv_obj_is_valid(network_items[left_focus])) {
+            lv_obj_scroll_to_view(network_items[left_focus], LV_ANIM_ON);
+            DEBUG("Auto-scrolled to network item %d", left_focus);
+        }
+    }
 }
 
 static bool connect_to_network(const char* ssid)
@@ -332,6 +344,10 @@ static void update_network_list(void)
         lv_obj_set_user_data(network_item, (void*)(intptr_t)i); // Store network index
         lv_obj_add_event_cb(network_item, network_item_clicked, LV_EVENT_CLICKED, NULL);
         
+        // Make sure item is properly sized for scrolling
+        lv_obj_set_width(network_item, lv_pct(100));
+        lv_obj_set_style_min_height(network_item, 40, 0); // Minimum height for better scrolling
+        
         // Style for connected network
         if (wifi_networks[i].is_connected) {
             lv_obj_set_style_bg_color(network_item, lv_color_hex(0x2E7D32), 0); // Green background
@@ -341,8 +357,9 @@ static void update_network_list(void)
             lv_obj_set_style_bg_color(network_item, lv_color_make(30, 30, 30), LV_STATE_DEFAULT);
         }
         
-        // Make sure it can be focused
+        // Make sure it can be focused and scrolled
         lv_obj_add_flag(network_item, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(network_item, LV_OBJ_FLAG_SCROLL_ON_FOCUS); // Auto scroll when focused
         
         DEBUG("Added network item %d (%s)", i, wifi_networks[i].ssid);
     }
@@ -429,6 +446,11 @@ static void wifi_key_handler(lv_event_t *e)
                         left_focus = wifi_network_count - 1; // Wrap to last network
                     }
                     DEBUG("Left focus moved up to %d", left_focus);
+                    
+                    // Scroll to focused item
+                    if (network_items[left_focus] && lv_obj_is_valid(network_items[left_focus])) {
+                        lv_obj_scroll_to_view(network_items[left_focus], LV_ANIM_ON);
+                    }
                 }
             } else {
                 // Navigate within buttons
@@ -449,6 +471,11 @@ static void wifi_key_handler(lv_event_t *e)
                         left_focus = 0; // Wrap to first network
                     }
                     DEBUG("Left focus moved down to %d", left_focus);
+                    
+                    // Scroll to focused item
+                    if (network_items[left_focus] && lv_obj_is_valid(network_items[left_focus])) {
+                        lv_obj_scroll_to_view(network_items[left_focus], LV_ANIM_ON);
+                    }
                 }
             } else {
                 // Navigate within buttons
@@ -481,9 +508,9 @@ static void wifi_key_handler(lv_event_t *e)
             }
             return;
         }
-        
+
         // Handle back button (B button or ESC)
-        if (key == 7 || key == 11 || key == 27 || key == LV_KEY_ESC) {
+        if (key == LV_KEY_ESC || key == LV_KEY_HOME) {
             DEBUG("Back key pressed");
             hide_menu_wifi_settings(NULL);
             return;
@@ -519,6 +546,8 @@ static void update_focus_visual()
             lv_obj_add_state(network_items[left_focus], LV_STATE_FOCUSED);
             lv_obj_set_style_bg_color(network_items[left_focus], lv_color_make(0, 120, 215), LV_STATE_DEFAULT);
             DEBUG("Highlighted network %d in left column", left_focus);
+
+            scroll_to_focused_item();
         }
     } else {
         // Right column (buttons) is active
@@ -598,6 +627,12 @@ lv_obj_t *show_menu_wifi_settings(lv_obj_t *parent)
     lv_obj_set_style_bg_color(network_list, lv_color_hex(0x2A2A2A), 0);
     lv_obj_set_style_border_width(network_list, 0, 0);
     lv_obj_set_style_text_font(network_list, &lv_font_montserrat_20, 0);
+    
+    // Enable scrolling for the list
+    lv_obj_add_flag(network_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(network_list, LV_DIR_VER);
+    lv_obj_set_style_pad_row(network_list, 5, 0); // Add padding between items
+    lv_obj_set_scroll_snap_y(network_list, LV_SCROLL_SNAP_START); // Snap to items
     
     // Create right column container for buttons
     lv_obj_t *right_container = lv_obj_create(wifi_menu_container);
