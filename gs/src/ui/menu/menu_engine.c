@@ -22,6 +22,7 @@ typedef struct {
     lv_coord_t* row_dsc;
     int max_cols;
     int max_rows;
+    bool was_focused; // Track if this section had focus when menu was hidden
 } menu_section_ctx_t;
 
 typedef struct _menu_ctx_s {
@@ -63,6 +64,7 @@ static void create_menu_pages(void);
 static void cancel_edit_mode(void);
 static void load_system_values(menu_ctx_t *ctx);
 static bool handle_edit_mode_input(uint32_t key);
+static void focus_btn(int row, int col);
 
 
 void menu_toggle(menu_ctx_t *ctx)
@@ -101,11 +103,30 @@ void menu_show(menu_ctx_t *ctx)
     ctx->menu_visible = true;
     lv_obj_clear_flag(ctx->menu, LV_OBJ_FLAG_HIDDEN);
 
-    ui_set_input_group(ctx->tabview_group);
-    lv_obj_t* tab_btns = lv_tabview_get_tab_btns(ctx->menu);
-    if (tab_btns) {
-        lv_group_focus_obj(tab_btns);
+    // Check if any section had focus when menu was hidden
+    bool restored_focus = false;
+    for (int i = 0; i < ctx->page_count; i++) {
+        if (ctx->menu_tabs[i].was_focused) {
+            DEBUG("Restoring focus to section %d", i);
+            ctx->current_section = i;
+            lv_tabview_set_act(ctx->menu, i, LV_ANIM_OFF);
+            ui_set_input_group(ctx->menu_tabs[i].input_group);
+            focus_btn(ctx->menu_tabs[i].current_row, ctx->menu_tabs[i].current_col);
+            ctx->menu_tabs[i].was_focused = false; // Reset the flag
+            restored_focus = true;
+            break;
+        }
     }
+
+    // If no section had focus, default to tab buttons
+    if (!restored_focus) {
+        ui_set_input_group(ctx->tabview_group);
+        lv_obj_t* tab_btns = lv_tabview_get_tab_btns(ctx->menu);
+        if (tab_btns) {
+            lv_group_focus_obj(tab_btns);
+        }
+    }
+
     INFO("Menu shown");
 }
 
@@ -114,6 +135,15 @@ void menu_hide(menu_ctx_t *ctx) // hide the last menu
     if (!ctx->menu) {
         ERROR("Menu not created");
         return;
+    }
+
+    // Save current focus state before hiding
+    lv_group_t* current_group = ui_get_input_group();
+    for (int i = 0; i < ctx->page_count; i++) {
+        ctx->menu_tabs[i].was_focused = (current_group == ctx->menu_tabs[i].input_group);
+        if (ctx->menu_tabs[i].was_focused) {
+            DEBUG("Section %d had focus when menu was hidden", i);
+        }
     }
 
     lv_obj_add_flag(ctx->menu, LV_OBJ_FLAG_HIDDEN);
@@ -583,6 +613,7 @@ lv_obj_t* create_menu_section(menu_ctx_t *ctx, uint8_t section, const char *titl
     ctx->menu_tabs[section].max_rows = MAX_GRID_ROWS;
     ctx->menu_tabs[section].current_row = 0;
     ctx->menu_tabs[section].current_col = 0;
+    ctx->menu_tabs[section].was_focused = false;
 
     lv_obj_set_layout(tab, LV_LAYOUT_GRID);
     
