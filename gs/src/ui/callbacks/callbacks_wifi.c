@@ -152,6 +152,6 @@ void wfb_ng_set_bandwidth(uint16_t bandwidth_idx)
 const char* get_wlan0_ip_address()
 {
     static char ip_address[16];
-    wifi_api_get_ip_address(WIFI_EXTERNAL, ip_address, sizeof(ip_address));
+    wifi_api_get_ip_address(WIFI_INTERNAL, ip_address, sizeof(ip_address));
     return ip_address;
 }

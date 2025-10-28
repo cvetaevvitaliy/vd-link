@@ -63,6 +63,13 @@ static pthread_mutex_t scan_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int scan_wifi_networks(void);
 static void update_network_list(void);
 
+wifi_connect_callback_t on_connect_callback = NULL;
+
+void wifi_settings_set_on_connect_cb(wifi_connect_callback_t cb)
+{
+    on_connect_callback = cb;
+}
+
 // Функція фонового сканування мереж
 static void* background_scan_thread(void* arg)
 {
@@ -219,6 +226,12 @@ static bool connect_to_network(const char* ssid)
                 snprintf(status_text, sizeof(status_text), "Connected to:\n%s", ssid);
                 lv_label_set_text(status_label, status_text);
                 lv_obj_set_style_text_color(status_label, lv_color_hex(0x4CAF50), 0); // Green
+            }
+            
+            // Call connection callback if set
+            if (on_connect_callback) {
+                DEBUG("Calling connection callback with SSID: %s", ssid);
+                on_connect_callback(ssid);
             }
             
             // Start background scan to update network list with new connection status
@@ -819,6 +832,12 @@ static void password_keyboard_event_cb(lv_event_t* e) {
                         snprintf(status_text, sizeof(status_text), "Connected to:\n%s", current_ssid);
                         lv_label_set_text(status_label, status_text);
                         lv_obj_set_style_text_color(status_label, lv_color_hex(0x4CAF50), 0); // Green
+                    }
+                    
+                    // Call connection callback if set
+                    if (on_connect_callback) {
+                        DEBUG("Calling connection callback with SSID: %s", current_ssid);
+                        on_connect_callback(current_ssid);
                     }
                     
                     // Start background scan to update network list with new connection status

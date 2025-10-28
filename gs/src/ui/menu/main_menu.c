@@ -1,5 +1,6 @@
 #include "main_menu.h"
 #include "menu_engine.h"
+#include "menu_wifi_settings.h"
 #include "log.h"
 #include "callbacks_wifi.h"
 #include "callbacks_rtp.h"
@@ -18,12 +19,32 @@ typedef enum {
 } menu_section_e;
 
 menu_ctx_t* main_menu_ctx = NULL;
+lv_obj_t *ip_addr_btn = NULL;
 
 void set_detection_handler(bool state)
 {
     // This function should be defined in your system code to handle detection state changes
     int value = state ? 1 : 0;
     //link_send_cmd(LINK_CMD_SET, LINK_SUBCMD_DETECTION, &value, sizeof(value));
+}
+
+
+void main_menu_update_ip_address()
+{
+    const char *new_ip = get_wlan0_ip_address();
+    if (ip_addr_btn) {
+        lv_obj_t *wifi_ip_btn = lv_obj_get_child_by_type(ip_addr_btn, 0, &lv_button_class);
+        if (wifi_ip_btn) {
+            lv_obj_t *label = lv_obj_get_child_by_type(wifi_ip_btn, 0, &lv_label_class);
+            lv_label_set_text(label, new_ip);
+        }
+    }
+}
+
+void wifi_settings_on_connect(const char* ssid)
+{
+    (void)ssid; // Unused parameter
+    main_menu_update_ip_address();
 }
 
 // Create all menu pages and structure
@@ -130,6 +151,7 @@ static void create_menu_pages(menu_ctx_t *ctx)
             .action = wifi_settings_click_handler // Define this handler in your system code
         }
     });
+    wifi_settings_set_on_connect_cb(wifi_settings_on_connect);
 
     item = create_button_item(system_tab, "Device keys mapping", "Change mapping");
     add_object_to_section(ctx, MENU_PAGE_SYSTEM, item);
@@ -143,9 +165,14 @@ static void create_menu_pages(menu_ctx_t *ctx)
     item = create_button_item(system_tab, "About", "Author and Version");
     add_object_to_section(ctx, MENU_PAGE_SYSTEM, item);
 
-    item = create_button_item(display_tab, "wlan0 IP", get_wlan0_ip_address());
-    add_object_to_section(ctx, MENU_PAGE_SYSTEM, item);
-
+    ip_addr_btn = create_button_item(system_tab, "wlan0 IP", get_wlan0_ip_address());
+    add_object_to_section(ctx, MENU_PAGE_SYSTEM, ip_addr_btn);
+    menu_set_item_callbacks(ctx, ip_addr_btn, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_BUTTON,
+        .callbacks.button = {
+            .action = main_menu_update_ip_address
+        }
+    });
 
     /* Display settings tab*/
     item = create_switch_item(display_tab, "Show CPU load and Temp of remote device", true);
