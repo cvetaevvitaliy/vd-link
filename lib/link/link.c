@@ -320,6 +320,7 @@ static int link_process_incoming_data(const char* data, size_t size)
                     ERROR("No RC callback registered");
                 }
             }
+            break;
         default:
             ERROR("Unknown packet type: %d", header->type);
             return -1;
@@ -595,13 +596,19 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
         ERROR("Command data size %zu exceeds maximum allowed %zu", size, sizeof(((link_command_pkt_t*)0)->data));
         return -1;
     }
+    
+    // Check for size field overflow (uint8_t can only hold 0-255)
+    if (size > LINK_MAX_CMD_SIZE) {
+        ERROR("Command data size %zu exceeds uint8_t limit (%d)", size, LINK_MAX_CMD_SIZE);
+        return -1;
+    }
 
     link_command_pkt_t cmd_pkt;
     cmd_pkt.header.type = PKT_CMD;
     cmd_pkt.header.size = size + sizeof(link_command_pkt_t) - sizeof(link_packet_header_t) - sizeof(cmd_pkt.data);
     cmd_pkt.cmd_id = cmd_id;
     cmd_pkt.subcmd_id = subcmd_id;
-    cmd_pkt.size = size;
+    cmd_pkt.size = (uint8_t)size;  // Safe cast after size check
     // Copy the command data into the packet
     if (size > 0) {
         memcpy(cmd_pkt.data, data, size);
@@ -609,13 +616,12 @@ int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t subcmd_id, cons
 
     // Calculate actual packet size more accurately
     size_t actual_packet_size = sizeof(link_packet_header_t) + sizeof(cmd_pkt.cmd_id) + sizeof(cmd_pkt.subcmd_id) + sizeof(cmd_pkt.size) + size;
-
     ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&cmd_pkt, actual_packet_size, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send command packet");
         return -1;
     }
-    DEBUG("Sent command packet: cmd_id=%d, subcmd_id=%d, size=%zu", cmd_id, subcmd_id, sent);
+    DEBUG("Sent command packet: cmd_id=%d, subcmd_id=%d, data_size=%zu, sent_bytes=%d", cmd_id, subcmd_id, size, (int)sent);
 
     return 0;
 }

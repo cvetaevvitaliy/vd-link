@@ -6,31 +6,31 @@
 #ifndef LINK_H
 #define LINK_H
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 // #include "detection_types.h"
 
 // Uncomment to use WFB-ng tunnel mode, comment out for direct port mode
 // #define LINK_USE_WFB_NG_TUNNEL
 
 #ifdef LINK_USE_WFB_NG_TUNNEL
-    // WFB-ng tunnel mode - use tunnel IPs and single port
-    #define LINK_PORT_RX 6211
-    #define LINK_GS_IP "10.5.0.2"
-    #define LINK_DRONE_IP "10.5.0.1"
+// WFB-ng tunnel mode - use tunnel IPs and single port
+#define LINK_PORT_RX 6211
+#define LINK_GS_IP "10.5.0.2"
+#define LINK_DRONE_IP "10.5.0.1"
 #else
-    // Direct port mode - use localhost and separate ports for data/commands
-    #define LINK_PORT_DATA 5610    // Port for data communication (drone->GS)
-    #define LINK_PORT_CMD 5611     // Port for command communication (GS->drone)
-    #define LINK_GS_IP "127.0.0.1"
-    #define LINK_DRONE_IP "127.0.0.1"
+// Direct port mode - use localhost and separate ports for data/commands
+#define LINK_PORT_DATA 5610 // Port for data communication (drone->GS)
+#define LINK_PORT_CMD 5611  // Port for command communication (GS->drone)
+#define LINK_GS_IP "127.0.0.1"
+#define LINK_DRONE_IP "127.0.0.1"
 #endif
 #define DETECTION_OBJ_NUM_MAX_SIZE 64
 #define LINK_MAX_DISPLAYPORT_SIZE 1500
 #define LINK_MAX_RC_CH_NUM 16
 #define LINK_MAX_CMD_SIZE 256
 
-/* Protocol description 
+/* Protocol description
     * 1. Link uses UDP sockets for communication
     * 2. Each packet has a header with type and size
     * 3. Packet types:
@@ -44,8 +44,10 @@
     *      - GET: Get information
     *      - SET: Set configuration
     *      - ACK: Acknowledge command
-    *   - Subcommands for specific actions like setting FPS, GOP, payload size, etc.
-    * 5. After command SET or GET sent, ACK/NACK packet should be sent back with the actual/updated data
+    *   - Subcommands for specific actions like setting FPS, GOP, payload size,
+   etc.
+    * 5. After command SET or GET sent, ACK/NACK packet should be sent back
+   with the actual/updated data
     * 6. Packet structure:
         +-------------------+-------------------+-------------------+
         | Packet Type       | Header Fields    | Payload Fields    |
@@ -69,6 +71,10 @@
         |                   |                  | ch_values[16]     |
         +-------------------+-------------------+-------------------+
 */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
     LINK_DRONE = 0,
@@ -105,6 +111,12 @@ typedef enum {
     LINK_SUBCMD_VBR,          /* uint32_t vbr_enabled */
     LINK_SUBCMD_CAMERA,       /* int32_t camera_id */
     LINK_SUBCMD_CODEC,        /* codec_type_t codec */
+
+    LINK_SUBCMD_BRIGHTNESS,   /* int32_t brightness */
+    LINK_SUBCMD_CONTRAST,     /* int32_t contrast */
+    LINK_SUBCMD_SATURATION,   /* int32_t saturation */
+    LINK_SUBCMD_SHARPNESS,    /* int32_t sharpness */
+    LINK_SUBCMD_LAST
 } link_subcommand_id_t;
 
 typedef struct {
@@ -201,5 +213,10 @@ void link_register_sys_telemetry_rx_cb(sys_telemetry_cmd_rx_cb_t cb);
 void link_register_displayport_rx_cb(displayport_cmd_rx_cb_t cb);
 void link_register_cmd_rx_cb(cmd_rx_cb_t cb);
 void link_register_rc_rx_cb(rc_cmd_rx_cb_t cb);
+
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif // LINK_H
