@@ -649,6 +649,20 @@ int camera_select_camera_by_idx(camera_manager_t *manager, common_config_t *conf
     return camera_select_camera(manager, config, next_camera);
 }
 
+int camera_get_current_camera_index(camera_manager_t *manager)
+{
+    if (!manager || !current_camera) {
+        return -1;
+    }
+
+    for (int i = 0; i < manager->count; i++) {
+        if (&manager->cameras[i] == current_camera) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int camera_select_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *next_camera)
 {
     if (!manager || !next_camera) {

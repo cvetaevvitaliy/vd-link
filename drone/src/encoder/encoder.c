@@ -15,6 +15,7 @@
 #define RTP_CLOCK_RATE 90000
 
 static encoder_callback enc_callback;
+extern common_config_t config;
 
 static inline uint64_t monotonic_time_us(void) {
     struct timespec ts;
@@ -474,6 +475,53 @@ int encoder_draw_overlay_buffer(const encoder_osd_config_t *cfg, const void *dat
         return -1;
     }
 
+    return 0;
+}
+
+int encoder_set_bitrate(int bitrate)
+{
+    VENC_CHN_ATTR_S venc_attr;
+    RK_MPI_VENC_SetBitrate(0, bitrate, bitrate * 0.8, bitrate * 1.2);
+    config.encoder_config.bitrate = bitrate;
+    return 0;
+    int ret = RK_MPI_VENC_GetVencChnAttr(0, &venc_attr);
+    if (ret != 0) {
+        printf("%s: GetVencChnAttr failed: %d\n", __FUNCTION__, ret);
+        return 0;
+    }
+    // Update bitrate based on current rate control mode
+    switch (venc_attr.stRcAttr.enRcMode) {
+    case VENC_RC_MODE_H264CBR:
+        venc_attr.stRcAttr.stH264Cbr.u32BitRate = (RK_U32)bitrate;
+        break;
+    case VENC_RC_MODE_H264VBR:
+        venc_attr.stRcAttr.stH264Vbr.u32MaxBitRate = (RK_U32)bitrate;
+        break;
+    case VENC_RC_MODE_H264AVBR:
+        venc_attr.stRcAttr.stH264Avbr.u32MaxBitRate = (RK_U32)bitrate;
+        break;
+    case VENC_RC_MODE_H265CBR:
+        venc_attr.stRcAttr.stH265Cbr.u32BitRate = (RK_U32)bitrate;
+        break;
+    case VENC_RC_MODE_H265VBR:
+        venc_attr.stRcAttr.stH265Vbr.u32MaxBitRate = (RK_U32)bitrate;
+        break;
+    case VENC_RC_MODE_H265AVBR:
+        venc_attr.stRcAttr.stH265Avbr.u32MaxBitRate = (RK_U32)bitrate;
+        break;
+    default:
+        printf("%s: Unsupported RC mode: %d\n", __FUNCTION__, venc_attr.stRcAttr.enRcMode);
+        return 0;
+    }
+
+    ret = RK_MPI_VENC_SetVencChnAttr(0, &venc_attr);
+    if (ret != 0) {
+        printf("%s: SetVencChnAttr failed: %d\n", __FUNCTION__, ret);
+        return -1;
+    }
+
+    printf("%s: Bitrate updated to %d bps\n", __FUNCTION__, bitrate);
+    config.encoder_config.bitrate = bitrate;
     return 0;
 }
 

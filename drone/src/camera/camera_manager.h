@@ -90,6 +90,7 @@ int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *confi
 int camera_manager_unbind_camera(camera_manager_t *manager, common_config_t *config, camera_info_t *camera);
 
 camera_info_t* camera_manager_get_current_camera(camera_manager_t *manager);
+int camera_get_current_camera_index(camera_manager_t *manager);
 
 
 // Utility functions for string conversion

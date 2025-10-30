@@ -10,5 +10,6 @@ int encoder_init(encoder_config_t *cfg);
 void encoder_focus_mode(encoder_config_t *cfg);
 int encoder_manual_push_frame(encoder_config_t *cfg, void *data, int size);
 void encoder_clean(void);
+int encoder_set_bitrate(int bitrate);
 
 #endif //ENCODER_H

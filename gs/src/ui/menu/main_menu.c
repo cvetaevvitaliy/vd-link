@@ -5,6 +5,7 @@
 #include "callbacks_wifi.h"
 #include "callbacks_rtp.h"
 #include "display_api.h"
+#include "link_callbacks.h"
 
 
 static const char *module_name_str = "MAIN_MENU";
@@ -112,7 +113,13 @@ static void create_menu_pages(menu_ctx_t *ctx)
     /* Video tab */
     item = create_switch_item(video_tab, "Focus mode", false);
     add_object_to_section(ctx, MENU_PAGE_VIDEO, item);
-    // TODO: Add focus mode callbacks when system functions are available
+    menu_set_item_callbacks(ctx, item, &(menu_item_callbacks_t){
+        .type = MENU_ITEM_TYPE_SWITCH,
+        .callbacks.switch_cb = {
+            .get = NULL,
+            .set = link_set_focus_mode
+        }
+    });
 
     item = create_switch_item(video_tab, "Use detection", false);
     add_object_to_section(ctx, MENU_PAGE_VIDEO, item);
