@@ -173,6 +173,9 @@ static void* link_listener_thread_func(void* arg)
     (void)arg;
     char buffer[4096];
     struct sockaddr_in received_from_addr;  // Separate variable for received packet sender
+    
+    INFO("Listener thread started");
+    
     while (run) {
         socklen_t addr_len = sizeof(received_from_addr);
         ssize_t bytes_received = recvfrom(link_ctx.listen_sockfd, buffer, sizeof(buffer), 0,
@@ -180,19 +183,36 @@ static void* link_listener_thread_func(void* arg)
         if (bytes_received < 0) {
 #ifdef _WIN32
             int error = WSAGetLastError();
-            if (error != WSAEINTR && error != WSAECONNRESET) {
+            if (error == WSAENOTSOCK || error == WSAEINVAL || error == WSAECONNABORTED) {
+                // Socket was closed, exit gracefully
+                DEBUG("Socket closed, listener thread exiting");
+                break;
+            } else if (error != WSAEINTR && error != WSAECONNRESET) {
                 ERROR("recvfrom failed with error: %d", error);
             }
 #else
-            if (errno != EINTR) {
+            if (errno == EBADF || errno == ENOTSOCK) {
+                // Socket was closed, exit gracefully
+                DEBUG("Socket closed, listener thread exiting");
+                break;
+            } else if (errno != EINTR) {
                 PERROR("recvfrom");
             }
 #endif
             continue;
         }
+        
+        if (bytes_received == 0) {
+            // This shouldn't happen with UDP, but just in case
+            DEBUG("Received 0 bytes, continuing");
+            continue;
+        }
+        
         // Process the received data
         link_process_incoming_data(buffer, bytes_received);
     }
+    
+    INFO("Listener thread finished");
 #ifdef _WIN32
     return 0;
 #else
@@ -347,6 +367,10 @@ int link_init(link_role_t is_gs)
     sync_cmd_ctx.waiting = false;
     sync_cmd_ctx.response_ready = false;
 
+    // Initialize socket descriptors to invalid values
+    link_ctx.send_sockfd = -1;
+    link_ctx.listen_sockfd = -1;
+
     // Create UDP socket
     link_ctx.send_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (link_ctx.send_sockfd < 0) {
@@ -429,6 +453,9 @@ int link_init(link_role_t is_gs)
 
 void link_deinit(void)
 {
+    INFO("Starting link deinitialization...");
+    
+    // Set the stop flag first
     run = false;
     
     // Wake up any waiting synchronous command
@@ -440,10 +467,26 @@ void link_deinit(void)
     }
     pthread_mutex_unlock(&sync_cmd_ctx.mutex);
     
-    pthread_join(link_listener_thread, NULL);
-    close(link_ctx.listen_sockfd);
-    close(link_ctx.send_sockfd);
+    // Close sockets first to interrupt any blocking recvfrom calls
+    INFO("Closing sockets to interrupt listener thread...");
+    if (link_ctx.listen_sockfd >= 0) {
+        close(link_ctx.listen_sockfd);
+        link_ctx.listen_sockfd = -1;
+    }
+    if (link_ctx.send_sockfd >= 0) {
+        close(link_ctx.send_sockfd);
+        link_ctx.send_sockfd = -1;
+    }
     
+    // Now wait for the thread to finish (should return quickly due to socket closure)
+    INFO("Waiting for listener thread to finish...");
+    if (pthread_join(link_listener_thread, NULL) != 0) {
+        ERROR("Failed to join listener thread");
+    } else {
+        INFO("Listener thread finished successfully");
+    }
+    
+    // Clean up synchronization objects
     pthread_cond_destroy(&sync_cmd_ctx.cond);
     pthread_mutex_destroy(&sync_cmd_ctx.mutex);
     

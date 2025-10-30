@@ -94,16 +94,17 @@ typedef enum {
 
 typedef enum {
     LINK_SUBCMD_SYS_INFO = 0,
-    LINK_SUBCMD_DETECTION,
-    LINK_SUBCMD_FOCUS_MODE,
-    LINK_SUBCMD_FPS,
-    LINK_SUBCMD_BITRATE,
-    LINK_SUBCMD_WFB_KEY,
-    LINK_SUBCMD_GOP,
-    LINK_SUBCMD_PAYLOAD_SIZE,
-    LINK_SUBCMD_VBR,
-    LINK_SUBCMD_SWITCH_CAMERAS,
-    LINK_SUBCMD_CODEC,
+    LINK_SUBCMD_DETECTION,    /* uint32_t enabled*/
+    LINK_SUBCMD_FOCUS_MODE,   /* uint32_t focus_quality */
+    LINK_SUBCMD_FPS,          /* uint32_t fps */
+    LINK_SUBCMD_BITRATE,      /* uint32_t bitrate */
+    LINK_SUBCMD_HDR,          /* uint32_t hdr_enabled */
+    LINK_SUBCMD_WFB_KEY,      /* char[64] wfb_key */
+    LINK_SUBCMD_GOP,          /* uint32_t gop_size */
+    LINK_SUBCMD_PAYLOAD_SIZE, /* uint32_t payload_size */
+    LINK_SUBCMD_VBR,          /* uint32_t vbr_enabled */
+    LINK_SUBCMD_CAMERA,       /* int32_t camera_id */
+    LINK_SUBCMD_CODEC,        /* codec_type_t codec */
 } link_subcommand_id_t;
 
 typedef struct {
@@ -147,18 +148,18 @@ typedef struct {
     float cpu_usage_percent;
     link_phy_type_t phy_type;
     union {
-    struct {
-        long rssi;
-        long rsrq;
-        long rsrp;
-        double snr;
-    } lte_signal;
-    struct {
-        long rssi;
-    } wcdma_signal;
-    struct {
-        long rssi;
-    } wifi_signal;
+        struct {
+            long rssi;
+            long rsrq;
+            long rsrp;
+            double snr;
+        } lte_signal;
+        struct {
+            long rssi;
+        } wcdma_signal;
+        struct {
+            long rssi;
+        } wifi_signal;
     };
 } link_sys_telemetry_t;
 
