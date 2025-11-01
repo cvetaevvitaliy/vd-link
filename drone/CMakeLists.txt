@@ -110,6 +110,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/librtp/include
         ${CMAKE_SOURCE_DIR}/lib/msp/src
         ${CMAKE_SOURCE_DIR}/lib/ini/src
+        ${CMAKE_SOURCE_DIR}/lib/client
 )
 
 add_subdirectory(src/msp)
@@ -130,6 +131,7 @@ add_executable(${PROJECT_NAME}
         src/hal/cpuinfo.c
         src/hal/lte_modem.c
         src/hal/transport.c
+        src/remote_client/remote_client.c
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -142,6 +144,7 @@ target_link_libraries(${PROJECT_NAME}
         ini
         link
         fc_msp
+        drone_client
         ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}

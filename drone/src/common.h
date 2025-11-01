@@ -96,10 +96,19 @@ typedef struct {
 } rtp_streamer_config_t;
 
 typedef struct {
+    bool enabled;
+    char server_host[256];
+    int server_port;
+    char drone_id[64];
+    int heartbeat_interval;
+} server_connection_config_t;
+
+typedef struct {
     camera_csi_config_t camera_csi_config;
     camera_usb_config_t camera_usb_config;
     rtp_streamer_config_t rtp_streamer_config;
     encoder_config_t encoder_config;
+    server_connection_config_t server_config;
     int stream_width;
     int stream_height;
     int stream_bitrate;

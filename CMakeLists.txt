@@ -66,6 +66,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/ini)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/link)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/client)
 
 
 # Set target platform: "gs" (default) or "drone"

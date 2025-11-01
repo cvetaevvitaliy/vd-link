@@ -20,6 +20,7 @@
 #include "camera/camera_csi.h"
 #include "camera/camera_usb.h"
 #include "fc_conn.h"
+#include "remote_client/remote_client.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 #define DEFAULT_SERIAL "/dev/ttyS0"
@@ -197,6 +198,14 @@ int main(int argc, char *argv[])
         config_cleanup(&config);
         return -1;
     }
+
+    // Initialize remote client (optional, based on config)
+    // TODO:Also need to send cameras list to server
+    ret = remote_client_init(&config);
+    if (ret != 0) {
+        printf("Failed to initialize remote client\n");
+        // Continue anyway, remote client is optional for now
+    }
     link_register_cmd_rx_cb(link_cmd_rx_callback);
     link_register_rc_rx_cb(link_rc_rx_callback);
 
@@ -240,6 +249,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Start remote client connection (if enabled)
+    remote_client_start();
+
     running = true;
     while (running) {
         if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
@@ -258,6 +270,9 @@ int main(int argc, char *argv[])
 
     camera_csi_deinit(&config.camera_csi_config);
     link_stop_telemetry_thread();
+
+    // Cleanup remote client
+    remote_client_cleanup();
 
     encoder_clean();
     rtp_streamer_deinit();

@@ -225,6 +225,17 @@ static int FUNC(common_config_t *cfg, const char *val) {                 \
     return 0;                                                            \
 }
 
+#define DEF_SETTER_STR(FUNC, FIELD_LVAL, MAXLEN, KEYSTR)                 \
+static int FUNC(common_config_t *cfg, const char *val) {                 \
+    if (!val || strlen(val) >= (MAXLEN)) {                               \
+        fprintf(stderr, "config: invalid %s '%s'\n", (KEYSTR), val);     \
+        return -1;                                                       \
+    }                                                                    \
+    strncpy((FIELD_LVAL), val, (MAXLEN) - 1);                           \
+    (FIELD_LVAL)[(MAXLEN) - 1] = '\0';                                   \
+    return 0;                                                            \
+}
+
 #define DEF_SETTER_ENUM(FUNC, FIELD_LVAL, PARSE_FN, KEYSTR)              \
 static int FUNC(common_config_t *cfg, const char *val) {                 \
     __typeof__(FIELD_LVAL) tmp;                                          \
@@ -292,6 +303,13 @@ DEF_SETTER_INT  (set_cam_li_strength,       cfg->camera_csi_config.light_inhibit
 DEF_SETTER_INT  (set_cam_li_level,          cfg->camera_csi_config.light_inhibition_level,    0, 255, "camera-csi.light_inhibition_level")
 DEF_SETTER_BOOL (set_cam_backlight_enable,  cfg->camera_csi_config.backlight_enable, "camera-csi.backlight_enable")
 DEF_SETTER_INT  (set_cam_backlight_strength,cfg->camera_csi_config.backlight_strength, 0, 255, "camera-csi.backlight_strength")
+
+// server
+DEF_SETTER_BOOL (set_server_enabled,    cfg->server_config.enabled, "server.enabled")
+DEF_SETTER_STR  (set_server_host,       cfg->server_config.server_host, sizeof(cfg->server_config.server_host), "server.host")
+DEF_SETTER_INT  (set_server_port,       cfg->server_config.server_port, 1, 65535, "server.port")
+DEF_SETTER_STR  (set_server_drone_id,   cfg->server_config.drone_id, sizeof(cfg->server_config.drone_id), "server.drone_id")
+DEF_SETTER_INT  (set_server_heartbeat,  cfg->server_config.heartbeat_interval, 5, 300, "server.heartbeat_interval")
 
 // video (common resolution for camera, encoder, stream)
 static int set_common_resolution(common_config_t *cfg, const char *val) {
@@ -373,6 +391,13 @@ static const config_entry_t CONFIG_TABLE[] = {
     MAP("camera-csi", "light_inhibition_level",     set_cam_li_level),
     MAP("camera-csi", "backlight_enable",           set_cam_backlight_enable),
     MAP("camera-csi", "backlight_strength",         set_cam_backlight_strength),
+
+    // server
+    MAP("server", "enabled",                        set_server_enabled),
+    MAP("server", "host",                           set_server_host),
+    MAP("server", "port",                           set_server_port),
+    MAP("server", "drone_id",                       set_server_drone_id),
+    MAP("server", "heartbeat_interval",             set_server_heartbeat),
 };
 
 #define CONFIG_TABLE_LEN (sizeof(CONFIG_TABLE)/sizeof(CONFIG_TABLE[0]))
@@ -496,6 +521,13 @@ void config_init_defaults(common_config_t *cfg)
     cfg->camera_csi_config.light_inhibition_level = 128;
     cfg->camera_csi_config.backlight_enable = false;
     cfg->camera_csi_config.backlight_strength = 50;
+
+    // Server connection defaults
+    cfg->server_config.enabled = false;  // Disabled by default
+    strncpy(cfg->server_config.server_host, "hard-tech.org.ua", sizeof(cfg->server_config.server_host) - 1);
+    cfg->server_config.server_port = 8000;
+    strncpy(cfg->server_config.drone_id, "drone-unknown", sizeof(cfg->server_config.drone_id) - 1);
+    cfg->server_config.heartbeat_interval = 30;
 
 }
 
