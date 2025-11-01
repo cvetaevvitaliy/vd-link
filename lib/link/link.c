@@ -106,6 +106,11 @@ typedef struct {
     struct sockaddr_in sender_addr;
     struct sockaddr_in listener_addr;
     uint32_t listener_port;
+    /* Optional overrides set at runtime via link_set_remote() */
+    bool override_remote;
+    char override_ip[64];
+    uint32_t override_data_port;
+    uint32_t override_cmd_port;
 } link_context_t;
 
 typedef struct {
@@ -421,16 +426,20 @@ int link_init(link_role_t is_gs)
     inet_pton(AF_INET, is_gs == LINK_GROUND_STATION ? LINK_DRONE_IP : LINK_GS_IP, &link_ctx.sender_addr.sin_addr);
     link_ctx.sender_addr.sin_port = htons(LINK_PORT_RX);
 #else
-    // Direct port mode - both drone and GS send to localhost (127.0.0.1)
-    inet_pton(AF_INET, "127.0.0.1", &link_ctx.sender_addr.sin_addr);
-    
-    // Configure target port based on role:
-    // Drone sends to GS on port 5610 (data port)
-    // GS sends to drone on port 5611 (command port)
-    if (is_gs == LINK_GROUND_STATION) {
-        link_ctx.sender_addr.sin_port = htons(LINK_PORT_CMD);   // GS sends commands to drone (5611)
+    // Direct port mode - target IP default to localhost unless overridden
+    if (link_ctx.override_remote && link_ctx.override_ip[0] != '\0') {
+        inet_pton(AF_INET, link_ctx.override_ip, &link_ctx.sender_addr.sin_addr);
     } else {
-        link_ctx.sender_addr.sin_port = htons(LINK_PORT_DATA);  // Drone sends data to GS (5610)
+        inet_pton(AF_INET, "127.0.0.1", &link_ctx.sender_addr.sin_addr);
+    }
+
+    // Configure target port based on role, but allow overrides if provided
+    if (is_gs == LINK_GROUND_STATION) {
+        uint32_t port = link_ctx.override_cmd_port ? link_ctx.override_cmd_port : LINK_PORT_CMD;
+        link_ctx.sender_addr.sin_port = htons(port);   // GS sends commands to drone
+    } else {
+        uint32_t port = link_ctx.override_data_port ? link_ctx.override_data_port : LINK_PORT_DATA;
+        link_ctx.sender_addr.sin_port = htons(port);  // Drone sends data to GS
     }
 #endif
 
@@ -455,6 +464,17 @@ int link_init(link_role_t is_gs)
     }
 
     return 0;
+}
+
+void link_set_remote(const char* remote_ip, int data_port, int cmd_port)
+{
+    if (remote_ip && remote_ip[0] != '\0') {
+        strncpy(link_ctx.override_ip, remote_ip, sizeof(link_ctx.override_ip) - 1);
+        link_ctx.override_ip[sizeof(link_ctx.override_ip) - 1] = '\0';
+        link_ctx.override_remote = true;
+    }
+    if (data_port > 0) link_ctx.override_data_port = (uint32_t)data_port;
+    if (cmd_port > 0) link_ctx.override_cmd_port = (uint32_t)cmd_port;
 }
 
 void link_deinit(void)

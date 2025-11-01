@@ -21,6 +21,7 @@
 #include "camera/camera_usb.h"
 #include "fc_conn.h"
 #include "remote_client/remote_client.h"
+#include "link.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 #define DEFAULT_SERIAL "/dev/ttyS0"
@@ -161,7 +162,7 @@ int main(int argc, char *argv[])
     printf(" Mirror: %s\n", config.camera_csi_config.mirror ? "ON" : "OFF");
     printf("\n");
 
-    config.encoder_config.callback = rtp_streamer_push_frame; // register callback for encoded frames
+    config.encoder_config.callback = rtp_streamer_push_frame;
 
     // Initialize camera manager and detect cameras
     int cameras_found = camera_manager_init(&camera_manager);
@@ -174,6 +175,39 @@ int main(int argc, char *argv[])
     printf("Camera Manager: Found %d cameras\n", cameras_found);
     camera_manager_print_all(&camera_manager);
     camera_info_t *primary_camera = camera_manager_get_primary(&camera_manager);
+
+    // Initialize remote client (optional, based on config) before RTP streamer
+    ret = remote_client_init(&config);
+    if (ret != 0) {
+        printf("Failed to initialize remote client\n");
+    }
+
+    // Start remote client connection and get stream config from server if enabled
+    ret = remote_client_start();
+    if (ret == 0 && config.server_config.enabled) {
+        char server_stream_ip[256];
+        int server_stream_port, server_telemetry_port;
+        
+        if (remote_client_get_stream_config(server_stream_ip, &server_stream_port, &server_telemetry_port) == 0) {
+            printf("Got stream config from server:\n");
+            printf(" Stream IP: %s\n", server_stream_ip);
+            printf(" Stream port: %d\n", server_stream_port);
+            printf(" Telemetry port: %d\n", server_telemetry_port);
+            
+            if (config.rtp_streamer_config.ip) {
+                free(config.rtp_streamer_config.ip);
+            }
+            config.rtp_streamer_config.ip = strdup(server_stream_ip);
+            config.rtp_streamer_config.port = server_stream_port;
+            
+            // Configure link module to send telemetry/data to server telemetry port
+            link_set_remote(server_stream_ip, server_telemetry_port, 0);
+
+            printf("Updated RTP streamer configuration with server values\n");
+        } else {
+            printf("Warning: Failed to get stream config from server, using config file values\n");
+        }
+    }
 
     ret = rtp_streamer_init(&config);
     if (ret != 0) {
@@ -199,13 +233,6 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    // Initialize remote client (optional, based on config)
-    // TODO:Also need to send cameras list to server
-    ret = remote_client_init(&config);
-    if (ret != 0) {
-        printf("Failed to initialize remote client\n");
-        // Continue anyway, remote client is optional for now
-    }
     link_register_cmd_rx_cb(link_cmd_rx_callback);
     link_register_rc_rx_cb(link_rc_rx_callback);
 
@@ -248,9 +275,6 @@ int main(int argc, char *argv[])
             return -1;
         }
     }
-
-    // Start remote client connection (if enabled)
-    remote_client_start();
 
     running = true;
     while (running) {

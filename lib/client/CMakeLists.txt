@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 2.8...3.13)
 
 add_library(drone_client STATIC
     drone_client.c
+    parson.c
 )
 
 target_include_directories(drone_client PUBLIC

@@ -200,6 +200,14 @@ typedef void (*rc_cmd_rx_cb_t)(const uint16_t* channel_values, size_t channel_co
 int link_init(link_role_t is_gs);
 void link_deinit(void);
 
+/*
+ * Configure runtime remote address and ports for link module.
+ * - remote_ip: IPv4 string of GS (or receiver) to send packets to. If NULL, defaults are used.
+ * - data_port: destination port for data (telemetry). If <=0, default is used.
+ * - cmd_port: destination port for commands. If <=0, default is used.
+ */
+void link_set_remote(const char* remote_ip, int data_port, int cmd_port);
+
 int link_send_ack(uint32_t ack_id);
 int link_send_displayport(const char* data, size_t size);
 int link_send_detection(const link_detection_box_t* data, size_t count);

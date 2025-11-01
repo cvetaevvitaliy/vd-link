@@ -1,4 +1,5 @@
 #include "drone_client.h"
+#include "parson.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -475,6 +476,64 @@ int drone_client_send_status(drone_client_handle_t* client, const char* status) 
         return DRONE_CLIENT_SUCCESS;
     } else {
         set_error(client, "Failed to send status");
+        return DRONE_CLIENT_ERROR;
+    }
+}
+
+int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_ip, int* stream_port, int* telemetry_port) {
+    if (!client || !stream_ip || !stream_port || !telemetry_port) return DRONE_CLIENT_ERROR;
+    if (!client->connected) return DRONE_CLIENT_ERROR;
+    
+    char path[256];
+    char response[BUFFER_SIZE];
+    
+    snprintf(path, sizeof(path), "/api/drones/%s/stream-config", client->config.drone_id);
+    
+    int result = send_http_request(client, "GET", path, NULL, response);
+    if (result < 0) {
+        return result;
+    }
+    
+    if (strstr(response, "HTTP/1.1 200") != NULL) {
+        char* json_start = strstr(response, "\r\n\r\n");
+        if (json_start) {
+            json_start += 4;
+            
+            JSON_Value *root_value = json_parse_string(json_start);
+            if (root_value == NULL) {
+                set_error(client, "Failed to parse JSON response");
+                return DRONE_CLIENT_ERROR;
+            }
+            
+            JSON_Object *root_object = json_value_get_object(root_value);
+            if (root_object == NULL) {
+                json_value_free(root_value);
+                set_error(client, "Invalid JSON response format");
+                return DRONE_CLIENT_ERROR;
+            }
+            
+            const char* ip = json_object_get_string(root_object, "stream_ip");
+            double stream_port_double = json_object_get_number(root_object, "stream_port");
+            double telemetry_port_double = json_object_get_number(root_object, "telemetry_port");
+            
+            if (ip != NULL && stream_port_double > 0 && telemetry_port_double > 0) {
+                strncpy(stream_ip, ip, 255);
+                stream_ip[255] = '\0';
+                *stream_port = (int)stream_port_double;
+                *telemetry_port = (int)telemetry_port_double;
+                
+                json_value_free(root_value);
+                return DRONE_CLIENT_SUCCESS;
+            } else {
+                json_value_free(root_value);
+                set_error(client, "Missing required fields in stream config response");
+                return DRONE_CLIENT_ERROR;
+            }
+        }
+        set_error(client, "Invalid HTTP response format");
+        return DRONE_CLIENT_ERROR;
+    } else {
+        set_error(client, "Failed to get stream config");
         return DRONE_CLIENT_ERROR;
     }
 }

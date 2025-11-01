@@ -12,7 +12,8 @@ int remote_client_init(const common_config_t* config);
 int remote_client_start(void);
 int remote_client_stop(void);
 void remote_client_cleanup(void);
-int remote_client_send_telemetry(const char* telemetry_json);
+int remote_client_send_telemetry(const char* telemetry_data);
+int remote_client_get_stream_config(char* stream_ip, int* stream_port, int* telemetry_port);
 bool remote_client_is_active(void);
 
 #ifdef __cplusplus
