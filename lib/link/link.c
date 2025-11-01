@@ -322,7 +322,12 @@ static int link_process_incoming_data(const char* data, size_t size)
             }
             break;
         default:
-            ERROR("Unknown packet type: %d", header->type);
+        ERROR("Unknown packet type: %d ssize %zu", header->type, size);
+        printf("pkt data: ");
+        for (size_t i = 0; i < size; i++) {
+            printf(" %02x ", ((uint8_t*)data)[i]);
+        }
+        printf("\n");
             return -1;
     }
 
