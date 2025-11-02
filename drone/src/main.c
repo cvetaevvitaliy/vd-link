@@ -30,6 +30,10 @@ static volatile bool running = false;
 common_config_t config = {0}; // common configuration
 camera_manager_t camera_manager; // camera manager instance
 
+// Server configuration obtained from remote server
+static char server_telemetry_ip[256] = {0};
+static int server_telemetry_port = 0;
+
 static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
@@ -176,6 +180,33 @@ int main(int argc, char *argv[])
     camera_manager_print_all(&camera_manager);
     camera_info_t *primary_camera = camera_manager_get_primary(&camera_manager);
 
+    // Connect to flight controller early to get device UID
+    if (connect_to_fc(DEFAULT_SERIAL, 115200) != 0) {
+        printf("Failed to connect to flight controller\n");
+    } else {
+        register_msp_displayport_cb(link_send_displayport);
+        
+        // Wait a bit for MSP_UID response
+        printf("Waiting for flight controller UID...\n");
+        for (int i = 0; i < 20; i++) { // Wait up to 2 seconds
+            if (is_device_uid_ready()) {
+                const char* uid = get_device_uid();
+                if (uid) {
+                    printf("Got FC device UID: %s\n", uid);
+                    // Update drone_id in config with FC UID
+                    strncpy(config.server_config.drone_id, uid, sizeof(config.server_config.drone_id) - 1);
+                    config.server_config.drone_id[sizeof(config.server_config.drone_id) - 1] = '\0';
+                }
+                break;
+            }
+            usleep(100 * 1000); // 100ms
+        }
+        
+        if (!is_device_uid_ready()) {
+            printf("Warning: Could not get FC device UID, using config value\n");
+        }
+    }
+
     // Initialize remote client (optional, based on config) before RTP streamer
     ret = remote_client_init(&config);
     if (ret != 0) {
@@ -244,12 +275,6 @@ int main(int argc, char *argv[])
         rtp_streamer_deinit();
         config_cleanup(&config);
         return -1;
-    }
-
-    if (connect_to_fc(DEFAULT_SERIAL, 115200) != 0) {
-        printf("Failed to connect to flight controller\n");
-    } else {
-        register_msp_displayport_cb(link_send_displayport);
     }
 
     /* Init and bind camera to encoder */

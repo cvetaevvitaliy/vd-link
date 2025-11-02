@@ -1,6 +1,7 @@
 #include "fc_conn.h"
 #include "msp.h"
 #include "msp_interface.h"
+#include "../../lib/msp/src/msp_protocol.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -28,6 +29,8 @@ typedef struct  {
 
 static msp_displayport_cb_t displayport_cb = NULL;
 static volatile bool run = false;
+static char device_uid[32] = {0}; // Store device UID from MSP_UID
+static bool uid_received = false;
 
 static pthread_t fc_read_thread;
 static pthread_mutex_t aggr_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -89,6 +92,13 @@ static void send_variant_request(void)
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
 }
 
+static void send_uid_request(void)
+{
+    uint8_t buffer[256];
+    int len = construct_msp_command(buffer, MSP_UID, NULL, 0, MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
+}
+
 // RX callback: assemble raw MSP frame and append into the current aggregation buffer.
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(msp_msg_t *msp_message)
@@ -96,8 +106,26 @@ static void rx_msp_callback(msp_msg_t *msp_message)
     // Filter only desired MSP commands; extend if needed
     if (!(msp_message->cmd == MSP_CMD_DISPLAYPORT ||
           msp_message->cmd == MSP_CMD_FC_VARIANT ||
-          msp_message->cmd == MSP_CMD_API_VERSION))
+          msp_message->cmd == MSP_CMD_API_VERSION ||
+          msp_message->cmd == MSP_UID))
     {
+        return;
+    }
+
+    // Handle MSP_UID response
+    if (msp_message->cmd == MSP_UID && msp_message->size >= 12) {
+        // MSP_UID returns 12 bytes of unique device ID
+        char uid_str[32];
+        snprintf(uid_str, sizeof(uid_str), "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+                 msp_message->payload[0], msp_message->payload[1], msp_message->payload[2], msp_message->payload[3],
+                 msp_message->payload[4], msp_message->payload[5], msp_message->payload[6], msp_message->payload[7],
+                 msp_message->payload[8], msp_message->payload[9], msp_message->payload[10], msp_message->payload[11]);
+        
+        strncpy(device_uid, uid_str, sizeof(device_uid) - 1);
+        device_uid[sizeof(device_uid) - 1] = '\0';
+        uid_received = true;
+        
+        printf("[MSP] Device UID received: %s\n", device_uid);
         return;
     }
 
@@ -159,8 +187,10 @@ static void* fc_read_thread_fn(void *arg)
 
         if (!fc_ready) {
             send_variant_request();
-            usleep(500 * 1000); // wait for response
+            usleep(500 * 1000);
             send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+            usleep(500 * 1000);
+            send_uid_request();
             usleep(500 * 1000);
             fc_ready = true;
         }
@@ -224,4 +254,14 @@ void disconnect_from_fc(void)
     pthread_mutex_unlock(&aggr_mutex);
 
     fprintf(stderr, "Disconnected from flight controller\n");
+}
+
+const char* get_device_uid(void)
+{
+    return uid_received ? device_uid : NULL;
+}
+
+bool is_device_uid_ready(void)
+{
+    return uid_received;
 }
