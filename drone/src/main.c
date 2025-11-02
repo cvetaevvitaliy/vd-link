@@ -217,14 +217,16 @@ int main(int argc, char *argv[])
     ret = remote_client_start();
     if (ret == 0 && config.server_config.enabled) {
         char server_stream_ip[256];
-        int server_stream_port, server_telemetry_port;
-        
-        if (remote_client_get_stream_config(server_stream_ip, &server_stream_port, &server_telemetry_port) == 0) {
+        int server_stream_port, server_telemetry_port, server_command_port, server_control_port;
+
+        if (remote_client_get_stream_config(server_stream_ip, &server_stream_port, &server_telemetry_port, &server_command_port, &server_control_port) == 0) {
             printf("Got stream config from server:\n");
             printf(" Stream IP: %s\n", server_stream_ip);
             printf(" Stream port: %d\n", server_stream_port);
             printf(" Telemetry port: %d\n", server_telemetry_port);
-            
+            printf(" Command port: %d\n", server_command_port);
+            printf(" Control port: %d\n", server_control_port);
+
             if (config.rtp_streamer_config.ip) {
                 free(config.rtp_streamer_config.ip);
             }

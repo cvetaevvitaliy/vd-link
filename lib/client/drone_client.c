@@ -480,14 +480,14 @@ int drone_client_send_status(drone_client_handle_t* client, const char* status) 
     }
 }
 
-int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_ip, int* stream_port, int* telemetry_port) {
-    if (!client || !stream_ip || !stream_port || !telemetry_port) return DRONE_CLIENT_ERROR;
+int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_ip, int* stream_port, int* telemetry_port, int* command_port, int* control_port) {
+    if (!client || !stream_ip || !stream_port || !telemetry_port || !command_port || !control_port) return DRONE_CLIENT_ERROR;
     if (!client->connected) return DRONE_CLIENT_ERROR;
     
     char path[256];
     char response[BUFFER_SIZE];
     
-    snprintf(path, sizeof(path), "/api/drones/%s/stream-config", client->config.drone_id);
+    snprintf(path, sizeof(path), "/api/drones/%s/drone-ports-config", client->config.drone_id);
     
     int result = send_http_request(client, "GET", path, NULL, response);
     if (result < 0) {
@@ -512,16 +512,19 @@ int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_i
                 return DRONE_CLIENT_ERROR;
             }
             
-            const char* ip = json_object_get_string(root_object, "stream_ip");
-            double stream_port_double = json_object_get_number(root_object, "stream_port");
-            double telemetry_port_double = json_object_get_number(root_object, "telemetry_port");
-            
-            if (ip != NULL && stream_port_double > 0 && telemetry_port_double > 0) {
+            const char* ip = json_object_get_string(root_object, "server_ip");
+            double stream_port_double = json_object_get_number(root_object, "video_send_port"); // video upstream
+            double telemetry_port_double = json_object_get_number(root_object, "telemetry_send_port"); // link upstream
+            double command_port_double = json_object_get_number(root_object, "command_listen_port"); // link downstream
+            double control_port_double = json_object_get_number(root_object, "control_listen_port"); // rc control port
+
+            if (ip != NULL && stream_port_double > 0 && telemetry_port_double > 0 && command_port_double > 0 && control_port_double > 0) {
                 strncpy(stream_ip, ip, 255);
                 stream_ip[255] = '\0';
                 *stream_port = (int)stream_port_double;
                 *telemetry_port = (int)telemetry_port_double;
-                
+                *command_port = (int)command_port_double;
+                *control_port = (int)control_port_double;
                 json_value_free(root_value);
                 return DRONE_CLIENT_SUCCESS;
             } else {

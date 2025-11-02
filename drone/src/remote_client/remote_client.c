@@ -138,13 +138,13 @@ int remote_client_send_telemetry(const char* telemetry_data)
     return drone_client_send_telemetry(g_client, telemetry_data);
 }
 
-int remote_client_get_stream_config(char* stream_ip, int* stream_port, int* telemetry_port)
+int remote_client_get_stream_config(char* stream_ip, int* stream_port, int* telemetry_port, int* command_port, int* control_port)
 {
     if (!g_enabled || !g_client) {
         return -1;
     }
-    
-    return drone_client_get_stream_config(g_client, stream_ip, stream_port, telemetry_port);
+
+    return drone_client_get_stream_config(g_client, stream_ip, stream_port, telemetry_port, command_port, control_port);
 }
 
 bool remote_client_is_active(void) {

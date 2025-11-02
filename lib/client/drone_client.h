@@ -62,7 +62,7 @@ int drone_client_stop(drone_client_handle_t* client);
 int drone_client_send_heartbeat(drone_client_handle_t* client);
 int drone_client_send_telemetry(drone_client_handle_t* client, const char* telemetry_json);
 int drone_client_send_status(drone_client_handle_t* client, const char* status);
-int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_ip, int* stream_port, int* telemetry_port);
+int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_ip, int* stream_port, int* telemetry_port, int* command_port, int* control_port);
 
 bool drone_client_is_connected(const drone_client_handle_t* client);
 bool drone_client_is_running(const drone_client_handle_t* client);
