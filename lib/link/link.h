@@ -88,6 +88,7 @@ typedef enum {
     PKT_SYS_TELEMETRY = 3,
     PKT_CMD = 4,
     PKT_RC = 5,
+    PKT_PING = 6,
     PKT_LAST
 } link_packet_type_t;
 
@@ -96,6 +97,7 @@ typedef enum {
     LINK_CMD_SET = 1,
     LINK_CMD_ACK = 2,
     LINK_CMD_NACK = 3,
+    LINK_CMD_LAST
 } link_command_id_t;
 
 typedef enum {
@@ -110,7 +112,7 @@ typedef enum {
     LINK_SUBCMD_PAYLOAD_SIZE, /* uint32_t payload_size */
     LINK_SUBCMD_VBR,          /* uint32_t vbr_enabled */
     LINK_SUBCMD_CAMERA,       /* int32_t camera_id */
-    LINK_SUBCMD_CODEC,        /* codec_type_t codec */
+    LINK_SUBCMD_CODEC,        /* uint32_t H265=1, H264=0 */
 
     LINK_SUBCMD_BRIGHTNESS,   /* int32_t brightness */
     LINK_SUBCMD_CONTRAST,     /* int32_t contrast */
@@ -158,6 +160,7 @@ typedef enum {
 typedef struct {
     float cpu_temperature;
     float cpu_usage_percent;
+    uint32_t rtt_ms;
     link_phy_type_t phy_type;
     union {
         struct {
@@ -191,6 +194,12 @@ typedef struct {
     uint16_t ch_values[LINK_MAX_RC_CH_NUM];
 } link_rc_pkt_t;
 
+typedef struct {
+    link_packet_header_t header;
+    uint64_t timestamp;
+    uint8_t pong;
+} link_ping_pkt_t;
+
 typedef void (*detection_cmd_rx_cb_t)(const link_detection_box_t* results, size_t count);
 typedef void (*sys_telemetry_cmd_rx_cb_t)(const link_sys_telemetry_t* telemetry);
 typedef void (*displayport_cmd_rx_cb_t)(const unsigned char* data, size_t size);
@@ -215,6 +224,13 @@ int link_send_sys_telemetry(link_sys_telemetry_t const* telemetry);
 int link_send_cmd(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size);
 int link_send_cmd_sync(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size, void* resp_data, size_t* resp_size, uint32_t timeout_ms);
 int link_send_rc(const uint16_t* channel_values, size_t channel_count);
+int link_send_ping(void);
+
+uint32_t link_get_last_rtt_ms(void);
+
+// RTT check thread management
+int link_start_rtt_check(int interval_ms);
+int link_stop_rtt_check(void);
 
 void link_register_detection_rx_cb(detection_cmd_rx_cb_t cb);
 void link_register_sys_telemetry_rx_cb(sys_telemetry_cmd_rx_cb_t cb);

@@ -132,6 +132,7 @@ add_executable(${PROJECT_NAME}
         src/hal/lte_modem.c
         src/hal/transport.c
         src/remote_client/remote_client.c
+        src/proxy/proxy.c
 )
 
 target_link_libraries(${PROJECT_NAME}

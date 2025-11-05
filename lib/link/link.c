@@ -111,6 +111,7 @@ typedef struct {
     char override_ip[64];
     uint32_t override_data_port;
     uint32_t override_cmd_port;
+    uint32_t link_rtt; // Round-Trip Time in milliseconds
 } link_context_t;
 
 typedef struct {
@@ -124,7 +125,10 @@ typedef struct {
 static const char* module_name_str = "LINK";
 static link_context_t link_ctx;
 static pthread_t link_listener_thread;
+static pthread_t rtt_check_thread;
 static volatile bool run = true;
+static volatile bool rtt_check_enabled = false;
+static int rtt_check_interval_ms = 5000; // Default 5 seconds
 static link_callbacks_t link_callbacks = {0};
 static sync_cmd_ctx_t sync_cmd_ctx = {0};
 
@@ -172,6 +176,52 @@ static int win32_cond_timedwait(CONDITION_VARIABLE *cond, CRITICAL_SECTION *mute
     }
 }
 #endif
+static int link_send_ping_response(link_ping_pkt_t* ping_pkt);
+static uint64_t get_current_timestamp(void);
+
+static void* link_listener_thread_func(void* arg);
+static void* rtt_check_thread_func(void* arg);
+static int link_process_incoming_data(const char* data, size_t size);
+
+static void* rtt_check_thread_func(void* arg)
+{
+    (void)arg;
+    INFO("Keepalive thread started with interval %d ms", rtt_check_interval_ms);
+    
+    while (run && rtt_check_enabled) {
+        // Send keepalive packet
+        if (link_send_ping() < 0) {
+            ERROR("Failed to send keepalive packet");
+        } else {
+            DEBUG("Keepalive packet sent");
+        }
+        
+        // Sleep for the specified interval
+        // Use small increments to allow for quick shutdown
+        int remaining_ms = rtt_check_interval_ms;
+        while (remaining_ms > 0 && run && rtt_check_enabled) {
+            int sleep_ms = remaining_ms > 100 ? 100 : remaining_ms;
+#ifdef _WIN32
+            Sleep(sleep_ms);
+#else
+            usleep(sleep_ms * 1000);
+#endif
+            remaining_ms -= sleep_ms;
+        }
+    }
+    
+    INFO("Keepalive thread finished");
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+uint32_t link_get_last_rtt_ms(void)
+{
+    return link_ctx.link_rtt;
+}
 
 static void* link_listener_thread_func(void* arg)
 {
@@ -326,6 +376,20 @@ static int link_process_incoming_data(const char* data, size_t size)
                 }
             }
             break;
+        case PKT_PING:
+            {
+                // Handle ping packet
+                DEBUG("Received ping packet");
+                link_ping_pkt_t* ping_pkt = (link_ping_pkt_t*)data;
+                if (ping_pkt->pong) {
+                    uint64_t timestamp = get_current_timestamp();
+                    link_ctx.link_rtt = timestamp - ping_pkt->timestamp;
+                    printf("Link RTT: %u ms\n", link_ctx.link_rtt);
+                } else {
+                    link_send_ping_response(ping_pkt);
+                }
+            }
+            break;
         default:
         ERROR("Unknown packet type: %d ssize %zu", header->type, size);
         printf("pkt data: ");
@@ -363,7 +427,11 @@ int link_init(link_role_t is_gs)
     } else {
         link_ctx.listener_port = LINK_PORT_CMD;   // Listen for commands from GS (5611)
     }
+    if (link_ctx.override_cmd_port) {
+        link_ctx.listener_port = link_ctx.override_cmd_port;
+    }
 #endif
+    INFO("UDP sockets: - Listen port: %d", link_ctx.listener_port);
 
     // Initialize synchronous command context
     if (pthread_mutex_init(&sync_cmd_ctx.mutex, NULL) != 0) {
@@ -483,6 +551,12 @@ void link_deinit(void)
     
     // Set the stop flag first
     run = false;
+    
+    // Stop keepalive thread if running
+    if (rtt_check_enabled) {
+        INFO("Stopping keepalive thread...");
+        link_stop_rtt_check();
+    }
     
     // Wake up any waiting synchronous command
     pthread_mutex_lock(&sync_cmd_ctx.mutex);
@@ -759,6 +833,92 @@ int link_send_rc(const uint16_t* channel_values, size_t channel_count)
 
     return 0;
 }
+
+static uint64_t get_current_timestamp(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+}
+
+int link_send_ping(void)
+{
+    link_ping_pkt_t ping_pkt;
+    ping_pkt.header.type = PKT_PING;
+    ping_pkt.header.size = sizeof(link_ping_pkt_t) - sizeof(link_packet_header_t);
+    ping_pkt.timestamp = get_current_timestamp();
+    ping_pkt.pong = 0;
+
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&ping_pkt, sizeof(link_packet_header_t) + ping_pkt.header.size, 0,
+                          (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    if (sent < 0) {
+        PERROR("Failed to send PING packet");
+        return -1;
+    }
+
+    return 0;
+}
+
+static int link_send_ping_response(link_ping_pkt_t* ping_pkt)
+{
+    if (ping_pkt == NULL) {
+        ERROR("No ping packet provided for response");
+        return -1;
+    }
+
+    ping_pkt->pong = 1; // Indicate this is a pong response
+
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)ping_pkt, sizeof(link_packet_header_t) + ping_pkt->header.size, 0,
+                          (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    if (sent < 0) {
+        PERROR("Failed to send PONG packet");
+        return -1;
+    }
+
+    return 0;
+}
+
+int link_start_rtt_check(int interval_ms)
+{
+    if (rtt_check_enabled) {
+        ERROR("RTT check thread is already running");
+        return -1;
+    }
+    
+    if (interval_ms <= 0) {
+        ERROR("Invalid RTT check interval: %d", interval_ms);
+        return -1;
+    }
+    
+    rtt_check_interval_ms = interval_ms;
+    rtt_check_enabled = true;
+    
+    if (pthread_create(&rtt_check_thread, NULL, rtt_check_thread_func, NULL) != 0) {
+        PERROR("Failed to create RTT check thread");
+        rtt_check_enabled = false;
+        return -1;
+    }
+
+    return 0;
+}
+
+int link_stop_rtt_check(void)
+{
+    if (!rtt_check_enabled) {
+        DEBUG("RTT check thread is not running");
+        return 0;
+    }
+    
+    rtt_check_enabled = false;
+    
+    if (pthread_join(rtt_check_thread, NULL) != 0) {
+        ERROR("Failed to join RTT check thread");
+        return -1;
+    }
+
+    return 0;
+}
+
 
 
 void link_register_detection_rx_cb(detection_cmd_rx_cb_t cb)

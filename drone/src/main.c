@@ -21,6 +21,7 @@
 #include "camera/camera_usb.h"
 #include "fc_conn.h"
 #include "remote_client/remote_client.h"
+#include "proxy/proxy.h"
 #include "link.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
@@ -30,9 +31,6 @@ static volatile bool running = false;
 common_config_t config = {0}; // common configuration
 camera_manager_t camera_manager; // camera manager instance
 
-// Server configuration obtained from remote server
-static char server_telemetry_ip[256] = {0};
-static int server_telemetry_port = 0;
 
 static void signal_handler(int sig)
 {
@@ -213,6 +211,13 @@ int main(int argc, char *argv[])
         printf("Failed to initialize remote client\n");
     }
 
+    // Initialize proxy module
+    ret = proxy_init();
+    if (ret != 0) {
+        printf("Failed to initialize proxy module\n");
+        return -1;
+    }
+
     // Start remote client connection and get stream config from server if enabled
     ret = remote_client_start();
     if (ret == 0 && config.server_config.enabled) {
@@ -227,14 +232,24 @@ int main(int argc, char *argv[])
             printf(" Command port: %d\n", server_command_port);
             printf(" Control port: %d\n", server_control_port);
 
+            /* // Uncomment for direct video and OSD streaming. Without drone-proxy
             if (config.rtp_streamer_config.ip) {
                 free(config.rtp_streamer_config.ip);
             }
             config.rtp_streamer_config.ip = strdup(server_stream_ip);
             config.rtp_streamer_config.port = server_stream_port;
             
-            // Configure link module to send telemetry/data to server telemetry port
-            link_set_remote(server_stream_ip, server_telemetry_port, 0);
+            Configure link module to send telemetry/data to server telemetry port
+            link_set_remote(server_stream_ip, server_telemetry_port, server_command_port);
+            */
+
+            // Setup proxy tunnels to redirect local ports to server
+            ret = proxy_setup_tunnels(server_stream_ip, server_stream_port, server_telemetry_port, server_command_port, server_control_port);
+            if (ret != 0) {
+                printf("Warning: Failed to setup proxy tunnels\n");
+            } else {
+                printf("Proxy tunnels configured successfully\n");
+            }
 
             printf("Updated RTP streamer configuration with server values\n");
         } else {
@@ -273,6 +288,16 @@ int main(int argc, char *argv[])
     ret = link_start_telemetry_thread();
     if (ret != 0) {
         printf("Failed to start telemetry thread\n");
+        encoder_clean();
+        rtp_streamer_deinit();
+        config_cleanup(&config);
+        return -1;
+    }
+
+    // Start keepalive thread to maintain NAT connection
+    ret = link_start_rtt_check(5000); // Send keepalive every 5 seconds
+    if (ret != 0) {
+        printf("Failed to start keepalive thread\n");
         encoder_clean();
         rtp_streamer_deinit();
         config_cleanup(&config);
@@ -324,6 +349,9 @@ int main(int argc, char *argv[])
 
     // Cleanup remote client
     remote_client_cleanup();
+
+    // Cleanup proxy module
+    proxy_cleanup();
 
     encoder_clean();
     rtp_streamer_deinit();

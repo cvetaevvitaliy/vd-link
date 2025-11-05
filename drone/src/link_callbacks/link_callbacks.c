@@ -207,6 +207,7 @@ void send_telemetry_update_thread_fn(void)
         link_sys_telemetry_t telemetry = {
             .cpu_temperature = cpu_info.temperature_celsius,
             .cpu_usage_percent = cpu_info.usage_percent,
+            .rtt_ms = link_get_last_rtt_ms(),
         };
 
         if (current_transport_method == TRANSPORT_METHOD_CELLULAR) {
