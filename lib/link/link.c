@@ -628,8 +628,9 @@ int link_send_displayport(const char* data, size_t size)
     pkt.header.type = PKT_MSP_DISPLAYPORT;
     pkt.header.size = size;
     memcpy(pkt.data, data, size);
+    uint32_t size_to_send = sizeof(link_packet_header_t) + size;
 
-    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&pkt, sizeof(pkt), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&pkt, size_to_send, 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send displayport packet");
         return -1;
