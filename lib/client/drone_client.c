@@ -1,5 +1,5 @@
+#define _GNU_SOURCE
 #include "drone_client.h"
-#include "parson.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <json-c/json.h>
 
 #define BUFFER_SIZE 4096
 
@@ -108,15 +109,63 @@ static int send_http_request(drone_client_handle_t* client, const char* method,
     }
     
     memset(response, 0, BUFFER_SIZE);
-    bytes_received = recv(sockfd, response, BUFFER_SIZE - 1, 0);
-    if (bytes_received < 0) {
-        set_error(client, "Error receiving response: %s", strerror(errno));
-        close(sockfd);
-        return DRONE_CLIENT_NET_ERROR;
+    
+    /* Read response in a loop until connection closes or buffer full */
+    int total_received = 0;
+    int max_attempts = 100; /* Prevent infinite loops */
+    int attempts = 0;
+    
+    while (total_received < BUFFER_SIZE - 1 && attempts < max_attempts) {
+        bytes_received = recv(sockfd, response + total_received, 
+                             BUFFER_SIZE - 1 - total_received, 0);
+        
+        if (bytes_received < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* Non-blocking socket would block, try again */
+                attempts++;
+                usleep(10000); /* Wait 10ms */
+                continue;
+            }
+            set_error(client, "Error receiving response: %s", strerror(errno));
+            close(sockfd);
+            return DRONE_CLIENT_NET_ERROR;
+        } else if (bytes_received == 0) {
+            /* Connection closed by server */
+            break;
+        }
+        
+        total_received += bytes_received;
+        attempts++;
+        
+        /* Check if we have a complete HTTP response */
+        if (total_received >= 4 && strstr(response, "\r\n\r\n")) {
+            /* We have headers, check if we need to read more body */
+            char* content_length_header = strstr(response, "Content-Length:");
+            if (content_length_header) {
+                int content_length = atoi(content_length_header + 15);
+                char* body_start = strstr(response, "\r\n\r\n");
+                if (body_start) {
+                    body_start += 4;
+                    int headers_length = body_start - response;
+                    int body_received = total_received - headers_length;
+                    
+                    if (body_received >= content_length) {
+                        /* We have the complete response */
+                        break;
+                    }
+                }
+            } else {
+                /* No Content-Length header, assume connection close indicates end */
+                /* Continue reading until connection closes */
+            }
+        }
     }
     
+    /* Ensure null termination */
+    response[total_received] = '\0';
+    
     close(sockfd);
-    return bytes_received;
+    return total_received;
 }
 
 static int register_drone(drone_client_handle_t* client) {
@@ -499,36 +548,70 @@ int drone_client_get_stream_config(drone_client_handle_t* client, char* stream_i
         if (json_start) {
             json_start += 4;
             
-            JSON_Value *root_value = json_parse_string(json_start);
-            if (root_value == NULL) {
+            /* Safety checks for JSON string before parsing */
+            if (!json_start || strlen(json_start) == 0) {
+                set_error(client, "Empty JSON response");
+                return DRONE_CLIENT_ERROR;
+            }
+            
+            /* Basic JSON sanity check */
+            if (json_start[0] != '{' && json_start[0] != '[') {
+                set_error(client, "Response doesn't look like JSON");
+                return DRONE_CLIENT_ERROR;
+            }
+            
+            /* Ensure string is reasonably terminated */
+            size_t json_len = strlen(json_start);
+            if (json_len > 10000) { /* Sanity check - config shouldn't be huge */
+                set_error(client, "JSON response too large");
+                return DRONE_CLIENT_ERROR;
+            }
+            
+            struct json_object *root_json = json_tokener_parse(json_start);
+            if (root_json == NULL) {
                 set_error(client, "Failed to parse JSON response");
                 return DRONE_CLIENT_ERROR;
             }
+
+            struct json_object *server_ip_obj = NULL;
+            struct json_object *video_send_port_obj = NULL;
+            struct json_object *telemetry_send_port_obj = NULL;
+            struct json_object *command_listen_port_obj = NULL;
+            struct json_object *control_listen_port_obj = NULL;
             
-            JSON_Object *root_object = json_value_get_object(root_value);
-            if (root_object == NULL) {
-                json_value_free(root_value);
-                set_error(client, "Invalid JSON response format");
+            if (!json_object_object_get_ex(root_json, "server_ip", &server_ip_obj) ||
+                !json_object_object_get_ex(root_json, "video_send_port", &video_send_port_obj) ||
+                !json_object_object_get_ex(root_json, "telemetry_send_port", &telemetry_send_port_obj) ||
+                !json_object_object_get_ex(root_json, "command_listen_port", &command_listen_port_obj) ||
+                !json_object_object_get_ex(root_json, "control_listen_port", &control_listen_port_obj)) {
+                json_object_put(root_json);
+                set_error(client, "Missing required fields in JSON response");
                 return DRONE_CLIENT_ERROR;
             }
             
-            const char* ip = json_object_get_string(root_object, "server_ip");
-            double stream_port_double = json_object_get_number(root_object, "video_send_port"); // video upstream
-            double telemetry_port_double = json_object_get_number(root_object, "telemetry_send_port"); // link upstream
-            double command_port_double = json_object_get_number(root_object, "command_listen_port"); // link downstream
-            double control_port_double = json_object_get_number(root_object, "control_listen_port"); // rc control port
-
-            if (ip != NULL && stream_port_double > 0 && telemetry_port_double > 0 && command_port_double > 0 && control_port_double > 0) {
+            const char* ip = json_object_get_string(server_ip_obj);
+            int stream_port_val = json_object_get_int(video_send_port_obj);
+            int telemetry_port_val = json_object_get_int(telemetry_send_port_obj);
+            int command_port_val = json_object_get_int(command_listen_port_obj);
+            int control_port_val = json_object_get_int(control_listen_port_obj);
+            
+            /* Additional safety checks for parsed values */
+            if (ip != NULL && strlen(ip) > 0 && strlen(ip) < 256 && 
+                stream_port_val > 0 && stream_port_val < 65536 && 
+                telemetry_port_val > 0 && telemetry_port_val < 65536 &&
+                command_port_val > 0 && command_port_val < 65536 &&
+                control_port_val > 0 && control_port_val < 65536) {
                 strncpy(stream_ip, ip, 255);
                 stream_ip[255] = '\0';
-                *stream_port = (int)stream_port_double;
-                *telemetry_port = (int)telemetry_port_double;
-                *command_port = (int)command_port_double;
-                *control_port = (int)control_port_double;
-                json_value_free(root_value);
+                *stream_port = stream_port_val;
+                *telemetry_port = telemetry_port_val;
+                *command_port = command_port_val;
+                *control_port = control_port_val;
+                
+                json_object_put(root_json);
                 return DRONE_CLIENT_SUCCESS;
             } else {
-                json_value_free(root_value);
+                json_object_put(root_json);
                 set_error(client, "Missing required fields in stream config response");
                 return DRONE_CLIENT_ERROR;
             }
