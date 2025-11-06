@@ -22,6 +22,25 @@ static void on_command(const char* command, const char* payload, void* user_data
     printf("[REMOTE_CLIENT] Command: %s, payload: %s\n", command, payload);
 }
 
+int fill_server_config_from_fc(server_connection_config_t* server_config, const char* fc_variant, const char* board_info, const char* fc_version, const char* craft_name, const char* uid) {
+    if (!server_config) {
+        return -1;
+    }
+
+    strncpy(server_config->drone_id, uid, sizeof(server_config->drone_id) - 1);
+    server_config->drone_id[sizeof(server_config->drone_id) - 1] = '\0';
+    strncpy(server_config->name, craft_name ? craft_name : uid, sizeof(server_config->name) - 1);
+    server_config->name[sizeof(server_config->name) - 1] = '\0';
+    strncpy(server_config->firmware_version, fc_version ? fc_version : "N/A", sizeof(server_config->firmware_version) - 1);
+    server_config->firmware_version[sizeof(server_config->firmware_version) - 1] = '\0';
+    strncpy(server_config->hardware_version, board_info ? board_info : "N/A", sizeof(server_config->hardware_version) - 1);
+    server_config->hardware_version[sizeof(server_config->hardware_version) - 1] = '\0';
+    strncpy(server_config->fc_variant, fc_variant ? fc_variant : "N/A", sizeof(server_config->fc_variant) - 1);
+    server_config->fc_variant[sizeof(server_config->fc_variant) - 1] = '\0';
+
+    return 0;
+}
+
 int remote_client_init(const common_config_t* config) {
     if (!config) {
         printf("[REMOTE_CLIENT] Invalid configuration\n");
@@ -52,10 +71,10 @@ int remote_client_init(const common_config_t* config) {
     strncpy(client_config.drone_id, config->server_config.drone_id, sizeof(client_config.drone_id) - 1);
     client_config.heartbeat_interval = config->server_config.heartbeat_interval;
     
-    strncpy(client_config.name, "VD Link Drone", sizeof(client_config.name) - 1);
-    strncpy(client_config.firmware_version, "1.0.0", sizeof(client_config.firmware_version) - 1);
-    strncpy(client_config.hardware_version, "Generic ARM", sizeof(client_config.hardware_version) - 1);
-    
+    strncpy(client_config.name, config->server_config.name, sizeof(client_config.name) - 1);
+    strncpy(client_config.firmware_version, config->server_config.firmware_version, sizeof(client_config.firmware_version) - 1);
+    strncpy(client_config.hardware_version, config->server_config.hardware_version, sizeof(client_config.hardware_version) - 1);
+
     client_config.video_capable = true;
     client_config.telemetry_capable = true;
     client_config.commands_capable = true;

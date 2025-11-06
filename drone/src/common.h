@@ -99,9 +99,13 @@ typedef struct {
     bool enabled;
     char server_host[256];
     int server_port;
-    char drone_id[64];
     int heartbeat_interval;
-    char name[64];
+
+    char drone_id[32]; // UID from flight controller (e.g., 1234567890ABCDEF12345678)
+    char name[64]; // Craft name from flight controller (e.g., MyDrone)
+    char firmware_version[10]; // Firmware version from flight controller (1.0.0, etc.)
+    char hardware_version[32]; // Hardware version from flight controller (STF4, etc.)
+    char fc_variant[5]; // Flight controller variant (BTFL, etc.)
 } server_connection_config_t;
 
 typedef struct {

@@ -133,6 +133,14 @@ static void send_name_request(void)
     printf("[MSP] Name request sent %d bytes\n", len);
 }
 
+static void send_board_info_request(void)
+{
+    uint8_t buffer[256];
+    int len = construct_msp_command_v1(buffer, MSP_BOARD_INFO, NULL, 0, MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
+    printf("[MSP] Board Info request sent %d bytes\n", len);
+}
+
 // RX callback: assemble raw MSP frame and append into the current aggregation buffer.
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t msp_cmd, uint16_t data_size, const uint8_t *payload)
@@ -162,7 +170,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     }
 
     else if (msp_cmd == MSP_FC_VARIANT) {
-        memcpy(fc_properties.fc_variant, payload, data_size < 256 ? data_size : 256);
+        memcpy(fc_properties.fc_variant, payload, data_size < sizeof(fc_properties.fc_variant) ? data_size : sizeof(fc_properties.fc_variant));
         fc_properties.fc_variant[sizeof(fc_properties.fc_variant) - 1] = '\0';
 
         printf("[MSP] FC Variant received: %s\n", fc_properties.fc_variant);
@@ -170,9 +178,8 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     }
 
     else if (msp_cmd == MSP_FC_VERSION) {
-        memcpy(fc_properties.fc_version, payload, data_size < 16 ? data_size : 16);
-        fc_properties.fc_version[sizeof(fc_properties.fc_version) - 1] = '\0';
-
+        sprintf(fc_properties.fc_version, "%d.%d.%d",
+                payload[0], payload[1], payload[2]);
         printf("[MSP] FC Version received: %s\n", fc_properties.fc_version);
         return;
     }
@@ -187,9 +194,8 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 
     else if (msp_cmd == MSP_BOARD_INFO) {
         if (data_size >= 2) {
-            for (int i = 0; i < data_size && i < sizeof(fc_properties.board_info); i++) {
-                fc_properties.board_info[i] = payload[i];
-            }
+            memcpy(fc_properties.board_info, payload, data_size < sizeof(fc_properties.board_info) ? data_size : sizeof(fc_properties.board_info));
+            fc_properties.board_info[data_size] = '\0';
             printf("[MSP] Board Info received: %s\n", fc_properties.board_info);
         }
         return;
@@ -285,6 +291,7 @@ int request_fc_info(void)
     send_name_request();
     send_api_version_request();
     send_fc_version_request();
+    send_board_info_request();
 
     return 0;
 }
@@ -352,6 +359,11 @@ const char* get_fc_variant(void)
 const char* get_fc_version(void)
 {
     return fc_properties.fc_version[0] ? fc_properties.fc_version : NULL;
+}
+
+const char* get_board_info(void)
+{
+    return fc_properties.board_info[0] ? fc_properties.board_info : NULL;
 }
 
 bool is_device_uid_ready(void)

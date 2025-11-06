@@ -183,7 +183,7 @@ int main(int argc, char *argv[])
         printf("Failed to connect to flight controller\n");
     } else {
         register_msp_displayport_cb(link_send_displayport);
-        
+
         // Wait a bit for MSP_UID response
         printf("Waiting for flight controller UID...\n");
         for (int i = 0; i < 20; i++) { // Wait up to 2 seconds
@@ -191,10 +191,12 @@ int main(int argc, char *argv[])
                 const char* uid = get_device_uid();
                 if (uid) {
                     printf("Got FC device UID: %s\n", uid);
-                    // Update drone_id in config with FC UID
-                    strncpy(config.server_config.drone_id, uid, sizeof(config.server_config.drone_id) - 1);
-                    config.server_config.drone_id[sizeof(config.server_config.drone_id) - 1] = '\0';
-                    strncpy(config.server_config.name, uid, sizeof(config.server_config.name) - 1);
+                    fill_server_config_from_fc(&config.server_config,
+                                            get_fc_variant(),
+                                            get_board_info(),
+                                            get_fc_version(),
+                                            get_craft_name(),
+                                            uid);
                 }
                 break;
             }

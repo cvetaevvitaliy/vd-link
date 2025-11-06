@@ -14,5 +14,6 @@ const char* get_device_uid(void);
 const char* get_craft_name(void);
 const char* get_fc_variant(void);
 const char* get_fc_version(void);
+const char* get_board_info(void);
 
 void disconnect_from_fc();
