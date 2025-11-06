@@ -381,14 +381,11 @@ static void get_str(struct json_object *o, const char *key, char *out, size_t n)
 static void parse_umts_neighbors(struct json_object *root, struct lte_umts_info *u)
 {
     u->neigh_count = 0;
-    struct lh_table *t = json_object_get_object(root)->table;
-    struct lh_entry *e;
-    for (e = t->head; e && u->neigh_count < MAX_NEIGH_CELLS; e = e->next) {
-        if (!e->v)
-            return;
-        struct json_object *val = (struct json_object *)e->v;
+    json_object_object_foreach(root, key, val) {
+        if (u->neigh_count >= MAX_NEIGH_CELLS)
+            break;
         if (!val)
-            return;
+            continue;
         if (!json_object_is_type(val, json_type_object))
             continue;
         if (json_object_object_get_ex(val, "primary_scrambling_code", NULL)) {
@@ -404,10 +401,9 @@ static void parse_umts_neighbors(struct json_object *root, struct lte_umts_info 
 static void parse_lte_cells(struct json_object *root, struct lte_lte_info *l)
 {
     l->neigh_count = 0;
-    struct lh_table *t = json_object_get_object(root)->table;
-    struct lh_entry *e;
-    for (e = t->head; e && l->neigh_count < MAX_NEIGH_CELLS; e = e->next) {
-        struct json_object *val = (struct json_object *)e->v;
+    json_object_object_foreach(root, key, val) {
+        if (l->neigh_count >= MAX_NEIGH_CELLS)
+            break;
         if (!json_object_is_type(val, json_type_object))
             continue;
         if (json_object_object_get_ex(val, "physical_cell_id", NULL)) {
