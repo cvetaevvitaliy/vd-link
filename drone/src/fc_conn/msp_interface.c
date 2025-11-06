@@ -32,6 +32,7 @@
 #include "msp_interface.h"
 
 #define DEFAULT_POOL_TIMEOUT (500) //ms
+msp_port_t msp_port;
 
 static int open_serial_port(msp_interface_t* dev)
 {
@@ -121,6 +122,8 @@ int msp_interface_init(msp_interface_t* dev)
     }
     msp_interface_write(dev, "NULL", 4); // just to open the port
 
+    msp_port.callback = dev->cb;
+
     return MSP_INTERFACE_OK;
 }
 
@@ -156,10 +159,10 @@ int msp_interface_read(msp_interface_t* dev, const volatile bool* catch)
             if (r == 0) {
                 break;
             }
-            msp_process_data(&dev->msp_state, c);
+            msp_process_received_data(&msp_port, c);
         }
     } else {
-        printf("Timeout: Flight Controller not response\n");
+        printf("[MSP] Timeout: Flight Controller not response\n");
         return MSP_INTERFACE_RX_TIME_OUT; // TIMEOUT pool
     }
 

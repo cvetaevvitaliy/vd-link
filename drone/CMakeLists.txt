@@ -113,7 +113,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/client
 )
 
-add_subdirectory(src/msp)
+add_subdirectory(src/fc_conn)
 
 add_executable(${PROJECT_NAME}
         src/camera/isp/sample_common_isp.c
@@ -144,7 +144,7 @@ target_link_libraries(${PROJECT_NAME}
         msp
         ini
         link
-        fc_msp
+        fc_conn
         drone_client
         ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}

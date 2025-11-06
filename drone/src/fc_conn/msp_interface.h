@@ -42,14 +42,13 @@ enum msp_state {
     MSP_INTERFACE_RX_TIME_OUT,
 };
 
-typedef void (*msp_callback)(msp_msg_t*);
-
 typedef struct {
     const char* uart_name;
     uint32_t baud_rate;
     int uart_fd;
     struct pollfd poll_fd;
     int telemetry_update;
+    msp_msg_callback cb;
     msp_state_t msp_state;
 
 } msp_interface_t;

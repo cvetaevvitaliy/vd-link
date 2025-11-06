@@ -194,6 +194,7 @@ int main(int argc, char *argv[])
                     // Update drone_id in config with FC UID
                     strncpy(config.server_config.drone_id, uid, sizeof(config.server_config.drone_id) - 1);
                     config.server_config.drone_id[sizeof(config.server_config.drone_id) - 1] = '\0';
+                    strncpy(config.server_config.name, uid, sizeof(config.server_config.name) - 1);
                 }
                 break;
             }

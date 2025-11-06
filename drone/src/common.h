@@ -101,6 +101,7 @@ typedef struct {
     int server_port;
     char drone_id[64];
     int heartbeat_interval;
+    char name[64];
 } server_connection_config_t;
 
 typedef struct {
