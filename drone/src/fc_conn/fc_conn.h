@@ -7,6 +7,7 @@ typedef int (*msp_displayport_cb_t)(const char* buffer, size_t size);
 int connect_to_fc(const char *device, int baudrate);
 void register_msp_displayport_cb(msp_displayport_cb_t cb);
 int request_fc_info(void);
+void msp_send_update_rssi(int rssi); 
 
 bool is_device_uid_ready(void);
 

@@ -10,6 +10,7 @@
 int config_parser_dumper(void* user, const char* section, const char* name, const char* value);
 void config_init_defaults(common_config_t *cfg);
 int config_load(const char *path, common_config_t *cfg);
+int config_save(const char *path, common_config_t *cfg);
 void config_cleanup(common_config_t *cfg);
 
 #endif //CONFIG_PARSER_H

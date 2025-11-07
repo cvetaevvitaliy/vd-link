@@ -155,6 +155,19 @@ static void send_board_info_request(void)
     printf("[MSP] Board Info request sent %d bytes\n", len);
 }
 
+static void send_fc_tx_info(uint8_t rssi)
+{
+    uint8_t buffer[10] = {0};
+    int len = construct_msp_command_v1((uint8_t*)buffer, MSP_SET_TX_INFO, &rssi, sizeof(rssi), MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, sizeof(buffer));
+    printf("[MSP] FC TX Info sent with RSSI %u\n", rssi);
+}
+
+void msp_send_update_rssi(int rssi)
+{
+    send_fc_tx_info((uint8_t)rssi);
+}
+
 // RX callback: assemble raw MSP frame and append into the current aggregation buffer.
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t msp_cmd, uint16_t data_size, const uint8_t *payload)

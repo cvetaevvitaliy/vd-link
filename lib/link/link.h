@@ -106,18 +106,20 @@ typedef enum {
     LINK_SUBCMD_FOCUS_MODE,   /* uint32_t focus_quality */
     LINK_SUBCMD_FPS,          /* uint32_t fps */
     LINK_SUBCMD_BITRATE,      /* uint32_t bitrate */
-    LINK_SUBCMD_HDR,          /* uint32_t hdr_enabled */
     LINK_SUBCMD_WFB_KEY,      /* char[64] wfb_key */
     LINK_SUBCMD_GOP,          /* uint32_t gop_size */
     LINK_SUBCMD_PAYLOAD_SIZE, /* uint32_t payload_size */
     LINK_SUBCMD_VBR,          /* uint32_t vbr_enabled */
     LINK_SUBCMD_CAMERA,       /* int32_t camera_id */
     LINK_SUBCMD_CODEC,        /* uint32_t H265=1, H264=0 */
-
+    
     LINK_SUBCMD_BRIGHTNESS,   /* int32_t brightness */
     LINK_SUBCMD_CONTRAST,     /* int32_t contrast */
     LINK_SUBCMD_SATURATION,   /* int32_t saturation */
     LINK_SUBCMD_SHARPNESS,    /* int32_t sharpness */
+    LINK_SUBCMD_HDR,          /* uint32_t hdr_enabled */
+
+    LINK_SUBCMD_SAVE_PERSISTENT, /* Save current config to persistent storage */
     LINK_SUBCMD_LAST
 } link_subcommand_id_t;
 

@@ -9,6 +9,8 @@
 #include "common.h"
 #include "hal/lte_modem.h"
 #include "hal/transport.h"
+#include "fc_conn/fc_conn.h"
+#include "config/config_parser.h"
 
 static volatile bool running;
 static pthread_t telemetry_thread;
@@ -18,6 +20,7 @@ extern camera_manager_t camera_manager;
 
 void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd_id, const void* data, size_t size)
 {
+    printf("Received command: cmd_id=%d, sub_cmd_id=%d, size=%zu\n", cmd_id, sub_cmd_id, size);
     // Handle received command
     switch (sub_cmd_id) {
         case LINK_SUBCMD_SYS_INFO:
@@ -42,14 +45,20 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
         case LINK_SUBCMD_CAMERA:
             if (cmd_id == LINK_CMD_GET) {
                 int current_camera_index = camera_get_current_camera_index(&camera_manager);
-                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CAMERA, &current_camera_index, sizeof(current_camera_index));
-            }
-            else if (cmd_id == LINK_CMD_SET) {
-                if (size != sizeof(int)) {
+                if (current_camera_index < 0) {
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CAMERA, NULL, 0);
                     break;
                 }
-                int camera_id = *(int*)data;
+                uint32_t num_cameras = camera_manager.count;
+                uint32_t response[2] = {current_camera_index, num_cameras};
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CAMERA, response, sizeof(response));
+            }
+            else if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CAMERA, NULL, 0);
+                    break;
+                }
+                uint32_t camera_id = *(uint32_t*)data;
                 printf("Switching to camera ID: %d\n", camera_id);
                 bool switch_success = camera_select_camera_by_idx(&camera_manager, &config, camera_id);
                 if (switch_success) {
@@ -79,7 +88,6 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
         case LINK_SUBCMD_FOCUS_MODE:
             // Handle focus mode command
             if (cmd_id == LINK_CMD_GET) {
-                /* Not implemented */
                 uint32_t focus_mode_quality = config.encoder_config.encoder_focus_mode.focus_quality;
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FOCUS_MODE, &focus_mode_quality, sizeof(focus_mode_quality));
             }
@@ -92,27 +100,41 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_FPS:
             if (cmd_id == LINK_CMD_GET) {
-                
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_FPS, NULL, 0);
+                uint32_t fps = config.encoder_config.fps;
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FPS, &fps, sizeof(fps));
             }
             else if (cmd_id == LINK_CMD_SET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_FPS, NULL, 0);
+                uint32_t fps = *(uint32_t*)data;
+                uint32_t old_fps = config.encoder_config.fps;
+                if (encoder_set_fps(fps) == 0) {
+                    printf("Set FPS to %u successfully\n", fps);
+                    config.encoder_config.fps = fps;
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FPS, &fps, sizeof(fps));
+                }
+                else {
+                    printf("Failed to set FPS to %u\n", fps);
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_FPS, &old_fps, sizeof(old_fps));
+                }
             }
             break;
         case LINK_SUBCMD_BITRATE:
             if (cmd_id == LINK_CMD_GET) {
-                uint32_t bitrate = config.encoder_config.bitrate;
+                uint32_t bitrate = config.encoder_config.bitrate / 1024; // convert bps to kbps
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_BITRATE, &bitrate, sizeof(bitrate));
             }
             else if (cmd_id == LINK_CMD_SET) {
                 uint32_t bitrate = *(uint32_t*)data;
-                int ret = encoder_set_bitrate(bitrate);
+                uint32_t old_bitrate = config.encoder_config.bitrate * 1024;
+                int ret = encoder_set_bitrate(bitrate * 1024 /* convert kbps to bps */);
                 if (ret == 0) {
-                    config.encoder_config.bitrate = bitrate;
+                    config.encoder_config.bitrate = bitrate * 1024;
                     link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_BITRATE, &bitrate, sizeof(bitrate));
                 } else {
-                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_BITRATE, NULL, 0);
+                    int ret = encoder_set_bitrate(old_bitrate);
+                    if (ret != 0) {
+                        printf("Critical: Failed to revert bitrate to %u after failed set to %u\n", old_bitrate, bitrate);
+                    }
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_BITRATE, &old_bitrate, sizeof(old_bitrate));
                 }
             }
             break;
@@ -130,12 +152,19 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
         case LINK_SUBCMD_GOP:
             if (cmd_id == LINK_CMD_SET) {
                 uint32_t gop_size = *(uint32_t*)data;
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_GOP, NULL, 0);
+                uint32_t old_gop = config.encoder_config.gop;
+                if (encoder_set_gop(gop_size) == 0) {
+                    printf("Set GOP to %u successfully\n", gop_size);
+                    config.encoder_config.gop = gop_size;
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_GOP, &gop_size, sizeof(gop_size));
+                } else {
+                    printf("Failed to set GOP to %u\n", gop_size);
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_GOP, &old_gop, sizeof(old_gop));
+                }
             }
             if (cmd_id == LINK_CMD_GET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_GOP, NULL, 0);
+                uint32_t gop = config.encoder_config.gop;
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_GOP, &gop, sizeof(gop));
             }
             break;
         case LINK_SUBCMD_PAYLOAD_SIZE:
@@ -151,31 +180,42 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_VBR:
             if (cmd_id == LINK_CMD_SET) {
-                bool vbr_enabled = *(bool*)data;
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_VBR, NULL, 0);
+                rate_control_mode_t mode = (data) ? *(rate_control_mode_t*)data : RATE_CONTROL_CBR;
+                if (encoder_set_rate_control(mode) == 0) {
+                    printf("Switched to %s successfully\n", mode == RATE_CONTROL_VBR ? "VBR" : "CBR");
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_VBR, &mode, sizeof(mode));
+                    break;
+                } else {
+                    printf("Failed to switch to %s\n", mode == RATE_CONTROL_VBR ? "VBR" : "CBR");
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_VBR, &config.encoder_config.rate_mode, sizeof(config.encoder_config.rate_mode));
+                }
             }
             if (cmd_id == LINK_CMD_GET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_VBR, NULL, 0);
+                uint32_t vbr_enabled = config.encoder_config.rate_mode == RATE_CONTROL_VBR;
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_VBR, &vbr_enabled, sizeof(vbr_enabled));
             }
             break;
         case LINK_SUBCMD_CODEC:
             if (cmd_id == LINK_CMD_SET) {
                 codec_type_t codec = *(codec_type_t*)data;
-                config.encoder_config.codec = codec;
-                encoder_clean();
-                if (encoder_init(&config.encoder_config) == 0) {
+                if (encoder_set_codec(codec) == 0) {
                     printf("Switched codec to %d successfully\n", codec);
                     link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CODEC, &codec, sizeof(codec));
                 } else {
                     printf("Failed to switch codec to %d\n", codec);
-                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CODEC, NULL, 0);
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CODEC, &config.encoder_config.codec, sizeof(config.encoder_config.codec));
                 }
             }
             else if (cmd_id == LINK_CMD_GET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CODEC, NULL, 0);
+                uint32_t is_codec_h265 = (config.encoder_config.codec == CODEC_H265) ? 1 : 0;
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CODEC, &is_codec_h265, sizeof(is_codec_h265));
+            }
+            break;
+        case LINK_SUBCMD_SAVE_PERSISTENT:
+            if (cmd_id == LINK_CMD_SET) {
+                // Save current configuration to persistent storage
+                config_save("/etc/vd-link.config", &config);
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SAVE_PERSISTENT, NULL, 0);
             }
             break;
         // Handle other commands...
@@ -245,6 +285,9 @@ void send_telemetry_update_thread_fn(void)
         }
 
         link_send_sys_telemetry(&telemetry);
+
+        msp_send_update_rssi(25);
+
         sleep(5); // Send telemetry every 5 seconds
 #if 0
         printf("Telemetry sent: CPU Temp=%.2fC, CPU Usage=%.2f%% ", cpu_info.temperature_celsius, cpu_info.usage_percent);

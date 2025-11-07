@@ -54,6 +54,22 @@ int config_parser_dumper(void* user, const char* section, const char* name, cons
     printf("%s = %s\n", name, value);
     return 0;
 }
+
+static int config_file_dumper(void* user, const char* section, const char* name, const char* value)
+{
+    FILE *file = (FILE*)user;
+    static char prev_section[50] = "";
+
+    if (strcmp(section, prev_section)) {
+        fprintf(file, "%s[%s]\n", (prev_section[0] ? "\n" : ""), section);
+        strncpy(prev_section, section, sizeof(prev_section));
+        prev_section[sizeof(prev_section) - 1] = '\0';
+    }
+    fprintf(file, "%s = %s\n", name, value);
+    return 0;
+}
+
+
 // case-insensitive equality
 static int str_ieq(const char *a, const char *b) {
     if (!a || !b) return 0;
@@ -476,6 +492,197 @@ int config_load(const char *path, common_config_t *cfg)
     return 0;
 }
 
+// Save configuration to file using existing CONFIG_TABLE structure
+int config_save(const char *path, common_config_t *cfg)
+{
+    if (!path || !cfg) {
+        fprintf(stderr, "config_save: invalid arguments\n");
+        return -1;
+    }
+
+    // Create backup of existing config file before overwriting
+    char backup_path[512];
+    snprintf(backup_path, sizeof(backup_path), "%s.backup", path);
+    
+    // Check if original file exists
+    FILE *original = fopen(path, "r");
+    if (original) {
+        fclose(original);
+        
+        // Copy original to backup
+        FILE *backup = fopen(backup_path, "w");
+        original = fopen(path, "r");
+        if (backup && original) {
+            char buffer[4096];
+            size_t bytes;
+            while ((bytes = fread(buffer, 1, sizeof(buffer), original)) > 0) {
+                fwrite(buffer, 1, bytes, backup);
+            }
+            fclose(backup);
+            fclose(original);
+            fprintf(stderr, "config_save: backup created at '%s'\n", backup_path);
+        } else {
+            if (backup) fclose(backup);
+            if (original) fclose(original);
+            fprintf(stderr, "config_save: warning - could not create backup\n");
+        }
+    }
+
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        fprintf(stderr, "config_save: cannot create file '%s': %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    fprintf(file, "# VD-Link Configuration File\n");
+    fprintf(file, "# Generated automatically\n\n");
+
+    // Track current section for grouping
+    const char *current_section = NULL;
+
+    // Iterate through CONFIG_TABLE to save all configured values
+    for (size_t i = 0; i < CONFIG_TABLE_LEN; i++) {
+        const char *section = CONFIG_TABLE[i].section;
+        const char *key = CONFIG_TABLE[i].key;
+        
+        // Write section header when section changes
+        if (!current_section || strcmp(current_section, section) != 0) {
+            if (current_section) fprintf(file, "\n"); // Add blank line between sections
+            fprintf(file, "[%s]\n", section);
+            current_section = section;
+        }
+
+        // Generate value string based on the key
+        char value_str[256] = {0};
+        
+        // Special handling for resolution (derived from width/height)
+        if (str_ieq(key, "resolution")) {
+            const char *resolution_name = "HD"; // default fallback
+            for (size_t j = 0; j < NUM_RESOLUTIONS; j++) {
+                if (RESOLUTIONS[j].width == cfg->encoder_config.width &&
+                    RESOLUTIONS[j].height == cfg->encoder_config.height) {
+                    resolution_name = RESOLUTIONS[j].name;
+                    break;
+                }
+            }
+            strncpy(value_str, resolution_name, sizeof(value_str) - 1);
+        }
+        // Special handling for bitrate
+        else if (str_ieq(key, "bitrate")) {
+            snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.bitrate);
+        }
+        // RTP streamer values
+        else if (str_ieq(section, "rtp-streamer")) {
+            if (str_ieq(key, "ip")) {
+                strncpy(value_str, cfg->rtp_streamer_config.ip ? cfg->rtp_streamer_config.ip : "127.0.0.1", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "port")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->rtp_streamer_config.port);
+            }
+        }
+        // Encoder values
+        else if (str_ieq(section, "encoder")) {
+            if (str_ieq(key, "codec")) {
+                strncpy(value_str, (cfg->encoder_config.codec == CODEC_H264) ? "h264" : "h265", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "rate_mode")) {
+                const char *rate_str = "cbr";
+                switch(cfg->encoder_config.rate_mode) {
+                    case RATE_CONTROL_CBR: rate_str = "cbr"; break;
+                    case RATE_CONTROL_VBR: rate_str = "vbr"; break;
+                    case RATE_CONTROL_AVBR: rate_str = "avbr"; break;
+                    case RATE_CONTROL_FIXQP: rate_str = "fixqp"; break;
+                }
+                strncpy(value_str, rate_str, sizeof(value_str) - 1);
+            } else if (str_ieq(key, "fps")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.fps);
+            } else if (str_ieq(key, "gop")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.gop);
+            }
+        }
+        // Encoder OSD values
+        else if (str_ieq(section, "encoder.osd")) {
+            if (str_ieq(key, "width")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.osd_config.width);
+            } else if (str_ieq(key, "height")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.osd_config.height);
+            } else if (str_ieq(key, "pos_x")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.osd_config.pos_x);
+            } else if (str_ieq(key, "pos_y")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.osd_config.pos_y);
+            }
+        }
+        // Encoder focus values
+        else if (str_ieq(section, "encoder.focus")) {
+            if (str_ieq(key, "focus_quality")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.encoder_focus_mode.focus_quality);
+            } else if (str_ieq(key, "frame_size")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->encoder_config.encoder_focus_mode.frame_size);
+            }
+        }
+        // Camera CSI values
+        else if (str_ieq(section, "camera-csi")) {
+            if (str_ieq(key, "cam_id")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.cam_id);
+            } else if (str_ieq(key, "flip")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.flip);
+            } else if (str_ieq(key, "mirror")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.mirror);
+            } else if (str_ieq(key, "brightness")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.brightness);
+            } else if (str_ieq(key, "contrast")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.contrast);
+            } else if (str_ieq(key, "saturation")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.saturation);
+            } else if (str_ieq(key, "sharpness")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.sharpness);
+            } else if (str_ieq(key, "auto_white_balance")) {
+                strncpy(value_str, cfg->camera_csi_config.auto_white_balance ? "true" : "false", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "correction")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.correction);
+            } else if (str_ieq(key, "fast_ae_min_time")) {
+                snprintf(value_str, sizeof(value_str), "%.6f", cfg->camera_csi_config.fast_ae_min_time);
+            } else if (str_ieq(key, "fast_ae_max_time")) {
+                snprintf(value_str, sizeof(value_str), "%.6f", cfg->camera_csi_config.fast_ae_max_time);
+            } else if (str_ieq(key, "fast_ae_max_gain")) {
+                snprintf(value_str, sizeof(value_str), "%.1f", cfg->camera_csi_config.fast_ae_max_gain);
+            } else if (str_ieq(key, "light_inhibition_enable")) {
+                strncpy(value_str, cfg->camera_csi_config.light_inhibition_enable ? "true" : "false", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "light_inhibition_strength")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.light_inhibition_strength);
+            } else if (str_ieq(key, "light_inhibition_level")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.light_inhibition_level);
+            } else if (str_ieq(key, "backlight_enable")) {
+                strncpy(value_str, cfg->camera_csi_config.backlight_enable ? "true" : "false", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "backlight_strength")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->camera_csi_config.backlight_strength);
+            }
+        }
+        // Server values
+        else if (str_ieq(section, "server")) {
+            if (str_ieq(key, "enabled")) {
+                strncpy(value_str, cfg->server_config.enabled ? "true" : "false", sizeof(value_str) - 1);
+            } else if (str_ieq(key, "host")) {
+                strncpy(value_str, cfg->server_config.server_host, sizeof(value_str) - 1);
+            } else if (str_ieq(key, "port")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->server_config.server_port);
+            } else if (str_ieq(key, "drone_id")) {
+                strncpy(value_str, cfg->server_config.drone_id, sizeof(value_str) - 1);
+            } else if (str_ieq(key, "owner_id")) {
+                strncpy(value_str, cfg->server_config.owner_id, sizeof(value_str) - 1);
+            } else if (str_ieq(key, "heartbeat_interval")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->server_config.heartbeat_interval);
+            }
+        }
+
+        // Write the key-value pair
+        if (value_str[0] != '\0') {
+            fprintf(file, "%s = %s\n", key, value_str);
+        }
+    }
+
+    fclose(file);
+    return 0;
+}
+
 void config_init_defaults(common_config_t *cfg)
 {
     memset(cfg, 0, sizeof(common_config_t));
@@ -531,6 +738,8 @@ void config_init_defaults(common_config_t *cfg)
     cfg->server_config.server_port = 8000;
     strncpy(cfg->server_config.drone_id, "drone-unknown", sizeof(cfg->server_config.drone_id) - 1);
     cfg->server_config.heartbeat_interval = 30;
+    strncpy(cfg->server_config.owner_id, "owner-unknown", sizeof(cfg->server_config.owner_id) - 1);
+    cfg->server_config.owner_id[sizeof(cfg->server_config.owner_id) - 1] = '\0';
 
 }
 
