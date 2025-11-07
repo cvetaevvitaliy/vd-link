@@ -25,6 +25,13 @@ struct drone_client_handle {
     pthread_t worker_thread;
     pthread_mutex_t mutex;
     
+    // Reconnection state
+    bool reconnect_enabled;
+    int reconnect_attempts;
+    int reconnect_delay_seconds;
+    time_t last_connection_attempt;
+    bool registration_valid;
+    
     drone_client_status_callback_t status_callback;
     void* status_callback_data;
     drone_client_error_callback_t error_callback;
@@ -39,6 +46,8 @@ static int register_drone(drone_client_handle_t* client);
 static int send_heartbeat_internal(drone_client_handle_t* client);
 static void* worker_thread_function(void* arg);
 static void set_error(drone_client_handle_t* client, const char* format, ...);
+static int test_tcp_connection(drone_client_handle_t* client);
+static int attempt_reconnection(drone_client_handle_t* client);
 
 static void set_error(drone_client_handle_t* client, const char* format, ...) {
     if (!client) return;
@@ -51,6 +60,98 @@ static void set_error(drone_client_handle_t* client, const char* format, ...) {
     if (client->error_callback) {
         client->error_callback(DRONE_CLIENT_ERROR, client->last_error, client->error_callback_data);
     }
+}
+
+// Test TCP connection to server without sending full HTTP request
+static int test_tcp_connection(drone_client_handle_t* client) {
+    int sockfd;
+    struct sockaddr_in server_addr;
+    struct hostent *server;
+    
+    if (!client) return DRONE_CLIENT_ERROR;
+    
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        return DRONE_CLIENT_NET_ERROR;
+    }
+    
+    // Set socket timeout for non-blocking connect test
+    struct timeval timeout;
+    timeout.tv_sec = 5;  // 5 second timeout
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    
+    server = gethostbyname(client->config.server_host);
+    if (server == NULL) {
+        close(sockfd);
+        return DRONE_CLIENT_NET_ERROR;
+    }
+    
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    memcpy(&server_addr.sin_addr.s_addr, server->h_addr_list[0], server->h_length);
+    server_addr.sin_port = htons(client->config.server_port);
+    
+    if (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        close(sockfd);
+        return DRONE_CLIENT_NET_ERROR;
+    }
+    
+    close(sockfd);
+    return DRONE_CLIENT_SUCCESS;
+}
+
+// Attempt to reconnect to server
+static int attempt_reconnection(drone_client_handle_t* client) {
+    if (!client || !client->reconnect_enabled) {
+        return DRONE_CLIENT_ERROR;
+    }
+    
+    time_t current_time = time(NULL);
+    
+    // Check if enough time has passed since last attempt
+    if (current_time - client->last_connection_attempt < client->reconnect_delay_seconds) {
+        return DRONE_CLIENT_ERROR; // Too soon to retry
+    }
+    
+    client->last_connection_attempt = current_time;
+    client->reconnect_attempts++;
+    
+    // Test basic TCP connection first
+    if (test_tcp_connection(client) != DRONE_CLIENT_SUCCESS) {
+        set_error(client, "Reconnection attempt %d failed - TCP connection failed", 
+                 client->reconnect_attempts);
+        return DRONE_CLIENT_NET_ERROR;
+    }
+    
+    // TCP connection works, now try to re-register if needed
+    if (!client->registration_valid) {
+        if (register_drone(client) != DRONE_CLIENT_SUCCESS) {
+            set_error(client, "Reconnection attempt %d failed - registration failed", 
+                     client->reconnect_attempts);
+            return DRONE_CLIENT_ERROR;
+        }
+        client->registration_valid = true;
+    }
+    
+    // Test with a heartbeat
+    if (send_heartbeat_internal(client) != DRONE_CLIENT_SUCCESS) {
+        client->registration_valid = false; // Mark registration as invalid
+        set_error(client, "Reconnection attempt %d failed - heartbeat failed", 
+                 client->reconnect_attempts);
+        return DRONE_CLIENT_ERROR;
+    }
+    
+    // Successful reconnection
+    client->connected = true;
+    client->reconnect_attempts = 0; // Reset counter on success
+    
+    if (client->status_callback) {
+        client->status_callback("reconnected", client->status_callback_data);
+    }
+    
+    return DRONE_CLIENT_SUCCESS;
 }
 
 static int send_http_request(drone_client_handle_t* client, const char* method, 
@@ -232,6 +333,7 @@ static int register_drone(drone_client_handle_t* client) {
             }
             
             client->connected = true;
+            client->registration_valid = true;
             if (client->status_callback) {
                 client->status_callback("connected", client->status_callback_data);
             }
@@ -281,28 +383,58 @@ static int send_heartbeat_internal(drone_client_handle_t* client) {
     }
 }
 
-// Worker thread function
+// Worker thread function with reconnection logic
 static void* worker_thread_function(void* arg) {
     drone_client_handle_t* client = (drone_client_handle_t*)arg;
     time_t last_heartbeat = 0;
-    int retry_count = 0;
+    int consecutive_failures = 0;
     
     if (!client) return NULL;
     
     while (client->running) {
         time_t current_time = time(NULL);
         
-        // Check if it's time for heartbeat
-        if (current_time - last_heartbeat >= client->config.heartbeat_interval) {
-            if (send_heartbeat_internal(client) == DRONE_CLIENT_SUCCESS) {
-                last_heartbeat = current_time;
-                retry_count = 0;  // Reset retry count on success
+        // If not connected, try to reconnect
+        if (!client->connected && client->reconnect_enabled) {
+            if (attempt_reconnection(client) == DRONE_CLIENT_SUCCESS) {
+                printf("Successfully reconnected to server\n");
+                consecutive_failures = 0;
+                last_heartbeat = current_time; // Reset heartbeat timer after reconnection
             } else {
-                retry_count++;
-                if (retry_count >= client->config.max_retries) {
-                    set_error(client, "Too many heartbeat failures, stopping");
+                // Wait before next reconnection attempt
+                sleep(client->reconnect_delay_seconds);
+                continue;
+            }
+        }
+        
+        // If connected, check if it's time for heartbeat
+        if (client->connected && (current_time - last_heartbeat >= client->config.heartbeat_interval)) {
+            int heartbeat_result = send_heartbeat_internal(client);
+            
+            if (heartbeat_result == DRONE_CLIENT_SUCCESS) {
+                last_heartbeat = current_time;
+                consecutive_failures = 0;  // Reset failure count on success
+            } else {
+                consecutive_failures++;
+                
+                // Mark as disconnected after network errors
+                if (heartbeat_result == DRONE_CLIENT_NET_ERROR) {
+                    client->connected = false;
+                    client->registration_valid = false;
+                    
+                    if (client->status_callback) {
+                        client->status_callback("disconnected", client->status_callback_data);
+                    }
+                    
+                    printf("Network error detected, will attempt reconnection\n");
+                }
+                
+                // If too many consecutive failures and reconnection is disabled, stop trying
+                if (consecutive_failures >= client->config.max_retries && !client->reconnect_enabled) {
+                    set_error(client, "Too many heartbeat failures, stopping (reconnection disabled)");
                     client->running = false;
                     client->connected = false;
+                    
                     if (client->status_callback) {
                         client->status_callback("disconnected", client->status_callback_data);
                     }
@@ -352,6 +484,13 @@ drone_client_handle_t* drone_client_create(const drone_client_config_t* config) 
     memcpy(&client->config, config, sizeof(client->config));
     client->connected = false;
     client->running = false;
+    
+    // Initialize reconnection parameters with defaults
+    client->reconnect_enabled = true;
+    client->reconnect_attempts = 0;
+    client->reconnect_delay_seconds = 5;  // Default: wait 5 seconds between attempts
+    client->last_connection_attempt = 0;
+    client->registration_valid = false;
     
     if (pthread_mutex_init(&client->mutex, NULL) != 0) {
         free(client);
@@ -442,13 +581,16 @@ int drone_client_start(drone_client_handle_t* client) {
     if (client->running) return DRONE_CLIENT_SUCCESS;
     
     // Connect first if not connected
-    if (!client->connected) {
+    int retries = 5;
+    while (!client->connected && retries > 0) {
         int ret = drone_client_connect(client);
-        if (ret != DRONE_CLIENT_SUCCESS) {
-            return ret;
+        if (ret == DRONE_CLIENT_SUCCESS) {
+            break;
         }
+        retries--;
+        sleep(1); // Wait before retrying
     }
-    
+
     client->running = true;
     
     if (pthread_create(&client->worker_thread, NULL, worker_thread_function, client) != 0) {
@@ -645,4 +787,60 @@ const char* drone_client_get_session_id(const drone_client_handle_t* client) {
 
 const char* drone_client_get_drone_id(const drone_client_handle_t* client) {
     return client ? client->config.drone_id : NULL;
+}
+
+// Reconnection management functions
+int drone_client_set_reconnect_enabled(drone_client_handle_t* client, bool enabled) {
+    if (!client) return DRONE_CLIENT_ERROR;
+    
+    pthread_mutex_lock(&client->mutex);
+    client->reconnect_enabled = enabled;
+    if (!enabled) {
+        // Reset reconnection state when disabling
+        client->reconnect_attempts = 0;
+    }
+    pthread_mutex_unlock(&client->mutex);
+    
+    return DRONE_CLIENT_SUCCESS;
+}
+
+int drone_client_set_reconnect_delay(drone_client_handle_t* client, 
+                                   int delay_seconds) {
+    if (!client || delay_seconds < 1) {
+        return DRONE_CLIENT_ERROR;
+    }
+    
+    pthread_mutex_lock(&client->mutex);
+    client->reconnect_delay_seconds = delay_seconds;
+    pthread_mutex_unlock(&client->mutex);
+    
+    return DRONE_CLIENT_SUCCESS;
+}
+
+bool drone_client_get_reconnect_enabled(const drone_client_handle_t* client) {
+    return client ? client->reconnect_enabled : false;
+}
+
+int drone_client_get_reconnect_attempts(const drone_client_handle_t* client) {
+    return client ? client->reconnect_attempts : -1;
+}
+
+int drone_client_force_reconnect(drone_client_handle_t* client) {
+    if (!client) return DRONE_CLIENT_ERROR;
+    
+    pthread_mutex_lock(&client->mutex);
+    
+    // Mark as disconnected to trigger reconnection
+    client->connected = false;
+    client->registration_valid = false;
+    client->reconnect_attempts = 0; // Reset attempt counter for forced reconnect
+    client->last_connection_attempt = 0; // Allow immediate reconnection
+    
+    pthread_mutex_unlock(&client->mutex);
+    
+    if (client->status_callback) {
+        client->status_callback("reconnecting", client->status_callback_data);
+    }
+    
+    return DRONE_CLIENT_SUCCESS;
 }

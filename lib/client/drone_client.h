@@ -71,6 +71,13 @@ const char* drone_client_get_last_error(const drone_client_handle_t* client);
 const char* drone_client_get_session_id(const drone_client_handle_t* client);
 const char* drone_client_get_drone_id(const drone_client_handle_t* client);
 
+// Reconnection management functions
+int drone_client_set_reconnect_enabled(drone_client_handle_t* client, bool enabled);
+int drone_client_set_reconnect_delay(drone_client_handle_t* client, int delay_seconds);
+bool drone_client_get_reconnect_enabled(const drone_client_handle_t* client);
+int drone_client_get_reconnect_attempts(const drone_client_handle_t* client);
+int drone_client_force_reconnect(drone_client_handle_t* client);
+
 #ifdef __cplusplus
 }
 #endif

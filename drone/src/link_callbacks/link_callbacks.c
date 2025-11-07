@@ -286,7 +286,7 @@ void send_telemetry_update_thread_fn(void)
 
         link_send_sys_telemetry(&telemetry);
 
-        msp_send_update_rssi(25);
+        // msp_send_update_rssi();
 
         sleep(5); // Send telemetry every 5 seconds
 #if 0
