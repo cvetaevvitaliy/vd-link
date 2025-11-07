@@ -74,6 +74,7 @@ int remote_client_init(const common_config_t* config) {
     strncpy(client_config.name, config->server_config.name, sizeof(client_config.name) - 1);
     strncpy(client_config.firmware_version, config->server_config.firmware_version, sizeof(client_config.firmware_version) - 1);
     strncpy(client_config.hardware_version, config->server_config.hardware_version, sizeof(client_config.hardware_version) - 1);
+    strncpy(client_config.owner_id, config->server_config.owner_id, sizeof(client_config.owner_id) - 1);
 
     client_config.video_capable = true;
     client_config.telemetry_capable = true;

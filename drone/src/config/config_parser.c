@@ -310,6 +310,8 @@ DEF_SETTER_STR  (set_server_host,       cfg->server_config.server_host, sizeof(c
 DEF_SETTER_INT  (set_server_port,       cfg->server_config.server_port, 1, 65535, "server.port")
 DEF_SETTER_STR  (set_server_drone_id,   cfg->server_config.drone_id, sizeof(cfg->server_config.drone_id), "server.drone_id")
 DEF_SETTER_INT  (set_server_heartbeat,  cfg->server_config.heartbeat_interval, 5, 300, "server.heartbeat_interval")
+DEF_SETTER_STR  (set_server_owner_id,   cfg->server_config.owner_id, sizeof(cfg->server_config.owner_id), "server.owner_id")
+
 
 // video (common resolution for camera, encoder, stream)
 static int set_common_resolution(common_config_t *cfg, const char *val) {
@@ -397,6 +399,7 @@ static const config_entry_t CONFIG_TABLE[] = {
     MAP("server", "host",                           set_server_host),
     MAP("server", "port",                           set_server_port),
     MAP("server", "drone_id",                       set_server_drone_id),
+    MAP("server", "owner_id",                       set_server_owner_id),
     MAP("server", "heartbeat_interval",             set_server_heartbeat),
 };
 

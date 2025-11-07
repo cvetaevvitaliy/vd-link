@@ -106,6 +106,7 @@ typedef struct {
     char firmware_version[10]; // Firmware version from flight controller (1.0.0, etc.)
     char hardware_version[32]; // Hardware version from flight controller (STF4, etc.)
     char fc_variant[5]; // Flight controller variant (BTFL, etc.)
+    char owner_id[32]; // Owner ID from config (e.g., default, user123)
 } server_connection_config_t;
 
 typedef struct {

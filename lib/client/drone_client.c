@@ -184,6 +184,7 @@ static int register_drone(drone_client_handle_t* client) {
         "\"name\": \"%s\","
         "\"firmware_version\": \"%s\","
         "\"hardware_version\": \"%s\","
+        "\"owner_id\": \"%s\","
         "\"capabilities\": {"
             "\"video\": %s,"
             "\"telemetry\": %s,"
@@ -194,9 +195,11 @@ static int register_drone(drone_client_handle_t* client) {
         client->config.name,
         client->config.firmware_version,
         client->config.hardware_version,
+        client->config.owner_id,
         client->config.video_capable ? "true" : "false",
         client->config.telemetry_capable ? "true" : "false",
         client->config.commands_capable ? "true" : "false");
+        printf("Registration body: %s\n", body);
     
     result = send_http_request(client, "POST", "/api/drones/register", body, response);
     if (result < 0) {
