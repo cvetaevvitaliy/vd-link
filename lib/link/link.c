@@ -132,8 +132,6 @@ static int rtt_check_interval_ms = 5000; // Default 5 seconds
 static link_callbacks_t link_callbacks = {0};
 static sync_cmd_ctx_t sync_cmd_ctx = {0};
 
-static int link_process_incoming_data(const char* data, size_t size);
-
 #ifdef _WIN32
 /* Windows-specific utility functions */
 static int gettimeofday(struct timeval *tv, void *tz) {
@@ -264,6 +262,10 @@ static void* link_listener_thread_func(void* arg)
         }
         
         // Process the received data
+        if (memcmp(buffer, "subscribe", 9) == 0) {
+            /* keepalive packet */
+            continue;
+        }
         link_process_incoming_data(buffer, bytes_received);
     }
     
@@ -600,12 +602,17 @@ void link_deinit(void)
 
 int link_send_ack(uint32_t ack_id)
 {
-    link_packet_header_t header;
-    header.type = PKT_ACK;
-    header.size = sizeof(ack_id);
+    struct {
+        link_packet_header_t header;
+        uint32_t ack_id;
+    } ack_packet;
+    
+    ack_packet.header.type = PKT_ACK;
+    ack_packet.header.size = sizeof(ack_id);
+    ack_packet.ack_id = ack_id;
 
-    // Send ACK packet
-    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&header, sizeof(header), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    // Send complete ACK packet (header + data)
+    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&ack_packet, sizeof(ack_packet), 0, (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
         PERROR("Failed to send ACK packet");
         return -1;

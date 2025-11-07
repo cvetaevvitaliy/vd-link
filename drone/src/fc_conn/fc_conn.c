@@ -48,6 +48,11 @@ static uint16_t aggregation_mtu = MSP_AGGR_MTU;
 static msp_interface_t msp_interface = { 0 };
 static volatile bool fc_ready = false;
 
+// OSD keepalive logic
+static struct timeval last_osd_time = {0};
+static volatile bool osd_received = false;
+static pthread_mutex_t osd_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static inline aggregated_buffer_t* aggr_cur(void)
 {
     return &aggregation_buffer[current_aggregation_buffer];
@@ -86,16 +91,25 @@ static void send_aggregated_buffer(void)
 
 static void send_display_size(uint8_t canvas_size_x, uint8_t canvas_size_y)
 {
-    uint8_t buffer[256];
+    if (!run || !fc_ready) {
+        printf("[MSP] Interface not ready, skipping canvas size request\n");
+        return;
+    }
+    
+    uint8_t buffer[256] = {0}; // Initialize buffer
     uint8_t payload[2] = {canvas_size_x, canvas_size_y};
     int len = construct_msp_command_v1(buffer, MSP_SET_OSD_CANVAS, payload, 2, MSP_OUTBOUND);
-    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
-    printf("[MSP] Set OSD canvas size request sent %d bytes\n", len);
+    if (len > 0) {
+        int ret = msp_interface_write(&msp_interface, buffer, (size_t)len);
+        printf("[MSP] Set OSD canvas size request sent %d bytes (ret=%d)\n", len, ret);
+    } else {
+        printf("[MSP] ERROR: Failed to construct canvas size command\n");
+    }
 }
 
 static void send_api_version_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_API_VERSION, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] API Version request sent %d bytes\n", len);
@@ -103,7 +117,7 @@ static void send_api_version_request(void)
 
 static void send_variant_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] FC Variant request sent %d bytes\n", len);
@@ -111,7 +125,7 @@ static void send_variant_request(void)
 
 static void send_fc_version_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_FC_VERSION, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] FC Version request sent %d bytes\n", len);
@@ -119,7 +133,7 @@ static void send_fc_version_request(void)
 
 static void send_uid_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_UID, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] UID request sent %d bytes\n", len);
@@ -127,7 +141,7 @@ static void send_uid_request(void)
 
 static void send_name_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_NAME, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] Name request sent %d bytes\n", len);
@@ -135,7 +149,7 @@ static void send_name_request(void)
 
 static void send_board_info_request(void)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_BOARD_INFO, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
     printf("[MSP] Board Info request sent %d bytes\n", len);
@@ -145,6 +159,18 @@ static void send_board_info_request(void)
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t msp_cmd, uint16_t data_size, const uint8_t *payload)
 {
+    // Safety check: validate payload pointer if data_size > 0
+    if (data_size > 0 && payload == NULL) {
+        printf("[MSP] ERROR: null payload with non-zero data_size=%u\n", data_size);
+        return;
+    }
+    
+    // Safety check: reasonable data size limit
+    if (data_size > 255) {
+        printf("[MSP] ERROR: excessive data_size=%u, dropping\n", data_size);
+        return;
+    }
+    
     // printf("[MSP] RX callback: cmd=0x%02X size=%u\n", msp_message->cmd, msp_message->size);
     if (msp_cmd == MSP_UID && data_size >= 12) {
         // MSP_UID returns 12 bytes of unique device ID
@@ -207,6 +233,12 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         if (!data_size) return;
         int len = construct_msp_command_v1(frame, msp_cmd, payload, (uint8_t)data_size, MSP_INBOUND);
 
+        // Update last OSD time (thread-safe)
+        pthread_mutex_lock(&osd_mutex);
+        gettimeofday(&last_osd_time, NULL);
+        osd_received = true;
+        pthread_mutex_unlock(&osd_mutex);
+
         pthread_mutex_lock(&aggr_mutex);
 
         aggregated_buffer_t* cur = aggr_cur();
@@ -265,17 +297,46 @@ static void* fc_read_thread_fn(void *arg)
             request_fc_info();
             usleep(500 * 1000);
             fc_ready = true;
+            // Initialize OSD timer (thread-safe)
+            pthread_mutex_lock(&osd_mutex);
+            gettimeofday(&last_osd_time, NULL);
+            osd_received = false;
+            pthread_mutex_unlock(&osd_mutex);
         }
 
         int ret = msp_interface_read(&msp_interface, &run);
         if (ret != MSP_INTERFACE_OK) {
             if (ret == MSP_INTERFACE_RX_TIME_OUT) {
-                // Optional: verbose timeout
-                fprintf(stderr, "[MSP] MSP_INTERFACE_RX_TIME_OUT\n");
+                // Check if we need to send canvas keepalive (thread-safe)
+                pthread_mutex_lock(&osd_mutex);
+                bool should_check = osd_received;
+                struct timeval last_time = last_osd_time;
+                pthread_mutex_unlock(&osd_mutex);
+                
+                if (should_check) {
+                    struct timeval current_time;
+                    gettimeofday(&current_time, NULL);
+                    
+                    long time_diff = (current_time.tv_sec - last_time.tv_sec) * 1000000 +
+                                    (current_time.tv_usec - last_time.tv_usec);
+                    
+                    // If no OSD for 3 seconds, send canvas size to wake up drone
+                    if (time_diff > 3000000) { // 3 seconds in microseconds
+                        printf("[MSP] No OSD for 3 seconds, sending canvas keepalive\n");
+                        send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+                        
+                        // Reset timer
+                        pthread_mutex_lock(&osd_mutex);
+                        gettimeofday(&last_osd_time, NULL);
+                        pthread_mutex_unlock(&osd_mutex);
+                    }
+                }
+                // Optional: verbose timeout (commented out to reduce spam)
+                // fprintf(stderr, "[MSP] MSP_INTERFACE_RX_TIME_OUT\n");
             } else {
                 fprintf(stderr, "[MSP] UART receive error (%d)\n", ret);
+                fc_ready = false;
             }
-            fc_ready = false;
         }
     }
 
