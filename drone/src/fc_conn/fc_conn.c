@@ -39,6 +39,16 @@ typedef struct {
     char board_info[16];
 } fc_properties_t;
 
+typedef enum {
+    MSP_DISPLAYPORT_KEEPALIVE,
+    MSP_DISPLAYPORT_CLOSE,
+    MSP_DISPLAYPORT_CLEAR,
+    MSP_DISPLAYPORT_DRAW_STRING,
+    MSP_DISPLAYPORT_DRAW_SCREEN,
+    MSP_DISPLAYPORT_SET_OPTIONS,
+    MSP_DISPLAYPORT_DRAW_SYSTEM
+} msp_displayport_cmd_e;
+
 static msp_displayport_cb_t displayport_cb = NULL;
 static volatile bool run = false;
 static fc_properties_t fc_properties = {0};
@@ -53,8 +63,6 @@ static msp_interface_t msp_interface = { 0 };
 static volatile bool fc_ready = false;
 
 // OSD keepalive logic
-static struct timeval last_osd_time = {0};
-static volatile bool osd_received = false;
 static pthread_mutex_t osd_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // CRSF LinkStatistics structure for telemetry
@@ -193,6 +201,7 @@ void msp_send_update_rssi(int rssi)
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t msp_cmd, uint16_t data_size, const uint8_t *payload)
 {
+    //printf("[MSP] RX callback: cmd=%u size=%u\n", msp_cmd, data_size);
     // Safety check: validate payload pointer if data_size > 0
     if (data_size > 0 && payload == NULL) {
         printf("[MSP] ERROR: null payload with non-zero data_size=%u\n", data_size);
@@ -218,7 +227,6 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         fc_properties.device_uid[sizeof(fc_properties.device_uid) - 1] = '\0';
 
         printf("[MSP] Device UID received: %s\n", fc_properties.device_uid);
-        return;
     }
 
     else if (msp_cmd == MSP_NAME) {
@@ -226,7 +234,6 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         fc_properties.name[sizeof(fc_properties.name) - 1] = '\0';
 
         printf("[MSP] Device Name received: %s\n", fc_properties.name);
-        return;
     }
 
     else if (msp_cmd == MSP_FC_VARIANT) {
@@ -234,14 +241,12 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         fc_properties.fc_variant[sizeof(fc_properties.fc_variant) - 1] = '\0';
 
         printf("[MSP] FC Variant received: %s\n", fc_properties.fc_variant);
-        return;
     }
 
     else if (msp_cmd == MSP_FC_VERSION) {
         sprintf(fc_properties.fc_version, "%d.%d.%d",
                 payload[0], payload[1], payload[2]);
         printf("[MSP] FC Version received: %s\n", fc_properties.fc_version);
-        return;
     }
 
     else if (msp_cmd == MSP_API_VERSION) {
@@ -249,7 +254,6 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
             uint16_t api_version = (uint16_t)(payload[0] | (payload[1] << 8));
             printf("[MSP] API Version received: %u\n", api_version);
         }
-        return;
     }
 
     else if (msp_cmd == MSP_BOARD_INFO) {
@@ -258,44 +262,77 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
             fc_properties.board_info[data_size] = '\0';
             printf("[MSP] Board Info received: %s\n", fc_properties.board_info);
         }
-        return;
     }
 
     // Filter only desired MSP commands; extend if needed
     else if (msp_cmd == MSP_DISPLAYPORT) {
-        uint8_t frame[3 + 1 + 1 + 255 + 1] = {0}; // "$M<" len cmd payload cksum"
-        if (!data_size) return;
-        int len = construct_msp_command_v1(frame, msp_cmd, payload, (uint8_t)data_size, MSP_INBOUND);
-
-        // Update last OSD time (thread-safe)
-        pthread_mutex_lock(&osd_mutex);
-        gettimeofday(&last_osd_time, NULL);
-        osd_received = true;
-        pthread_mutex_unlock(&osd_mutex);
-
-        pthread_mutex_lock(&aggr_mutex);
-
-        aggregated_buffer_t* cur = aggr_cur();
-
-        // If frame does not fit — flush immediately once, then retry append.
-        if ((uint32_t)cur->size + len > cur->cap) {
-            // Immediate flush (one-shot), to keep frame boundaries and MTU limits.
-            send_aggregated_buffer();
-            // Retry append; if still too large (oversize frame) — drop it (shouldn't happen)
-            cur = aggr_cur();
-            if ((uint32_t)cur->size + len > cur->cap) {
-                printf("[MSP] Oversize MSP frame (%u bytes), dropped\n", len);
-                pthread_mutex_unlock(&aggr_mutex);
-                return;
+        msp_displayport_cmd_e sub_cmd = payload[0];
+        switch(sub_cmd) {
+        case MSP_DISPLAYPORT_KEEPALIVE: // 0 -> Open/Keep-Alive DisplayPort
+        {
+            if (!fc_ready) {
+                send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+                fc_ready = true;
             }
         }
-
-        memcpy(cur->buffer + cur->size, frame, len);
-        cur->size += len;
-
-        pthread_mutex_unlock(&aggr_mutex);
+            break;
+        case MSP_DISPLAYPORT_CLOSE: // 1 -> Close DisplayPort
+            break;
+        case MSP_DISPLAYPORT_CLEAR: // 2 -> Clear Screen
+            break;
+        case MSP_DISPLAYPORT_DRAW_STRING: // 3 -> Draw String
+            break;
+        case MSP_DISPLAYPORT_DRAW_SCREEN: // 4 -> Draw Screen
+            break;
+        case MSP_DISPLAYPORT_SET_OPTIONS: // 5 -> Set Options (HDZero/iNav)
+            break;
+        default:
+            break;
+        }
     }
 
+    uint8_t frame[3 + 1 + 1 + 255 + 1] = {0}; // "$M<" len cmd payload cksum"
+    if (!data_size) return;
+    int len = construct_msp_command_v1(frame, msp_cmd, payload, (uint8_t)data_size, MSP_INBOUND);
+
+    pthread_mutex_lock(&aggr_mutex);
+
+    aggregated_buffer_t* cur = aggr_cur();
+
+    // If frame does not fit — flush immediately once, then retry append.
+    if ((uint32_t)cur->size + len > cur->cap) {
+        // Immediate flush (one-shot), to keep frame boundaries and MTU limits.
+        send_aggregated_buffer();
+        // Retry append; if still too large (oversize frame) — drop it (shouldn't happen)
+        cur = aggr_cur();
+        if ((uint32_t)cur->size + len > cur->cap) {
+            printf("[MSP] Oversize MSP frame (%u bytes), dropped\n", len);
+            pthread_mutex_unlock(&aggr_mutex);
+            return;
+        }
+    }
+
+    memcpy(cur->buffer + cur->size, frame, len);
+    cur->size += len;
+
+    pthread_mutex_unlock(&aggr_mutex);
+
+    switch (msp_cmd) {
+    case MSP_DISPLAYPORT:
+    case MSP_FC_VERSION:
+    case MSP_UID:
+    case MSP_API_VERSION:
+    case MSP_BOARD_INFO:
+        break;
+    default: {
+        uint8_t buffer[256] = {0};
+        int cmd_len = construct_msp_command_v1(buffer, msp_cmd, 0, 0, MSP_OUTBOUND);
+        if (cmd_len > 0) {
+            msp_interface_write(&msp_interface, buffer, sizeof(buffer));
+        }
+    }
+        break;
+    }
 }
 
 static void* fc_read_thread_fn(void *arg)
@@ -331,42 +368,12 @@ static void* fc_read_thread_fn(void *arg)
             request_fc_info();
             usleep(500 * 1000);
             fc_ready = true;
-            // Initialize OSD timer (thread-safe)
-            pthread_mutex_lock(&osd_mutex);
-            gettimeofday(&last_osd_time, NULL);
-            osd_received = false;
-            pthread_mutex_unlock(&osd_mutex);
         }
 
         int ret = msp_interface_read(&msp_interface, &run);
         if (ret != MSP_INTERFACE_OK) {
             if (ret == MSP_INTERFACE_RX_TIME_OUT) {
-                // Check if we need to send canvas keepalive (thread-safe)
-                pthread_mutex_lock(&osd_mutex);
-                bool should_check = osd_received;
-                struct timeval last_time = last_osd_time;
-                pthread_mutex_unlock(&osd_mutex);
-                
-                if (should_check) {
-                    struct timeval current_time;
-                    gettimeofday(&current_time, NULL);
-                    
-                    long time_diff = (current_time.tv_sec - last_time.tv_sec) * 1000000 +
-                                    (current_time.tv_usec - last_time.tv_usec);
-                    
-                    // If no OSD for 3 seconds, send canvas size to wake up drone
-                    if (time_diff > 3000000) { // 3 seconds in microseconds
-                        printf("[MSP] No OSD for 3 seconds, sending canvas keepalive\n");
-                        send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
-                        
-                        // Reset timer
-                        pthread_mutex_lock(&osd_mutex);
-                        gettimeofday(&last_osd_time, NULL);
-                        pthread_mutex_unlock(&osd_mutex);
-                    }
-                }
-                // Optional: verbose timeout (commented out to reduce spam)
-                // fprintf(stderr, "[MSP] MSP_INTERFACE_RX_TIME_OUT\n");
+                fc_ready = false;
             } else {
                 fprintf(stderr, "[MSP] UART receive error (%d)\n", ret);
                 fc_ready = false;
