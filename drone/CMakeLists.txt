@@ -160,9 +160,9 @@ install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 
 # Install /etc/vd-link.config from assets
 if(CMAKE_INSTALL_PREFIX STREQUAL "/usr" OR CMAKE_INSTALL_PREFIX STREQUAL "/")
-    install(FILES ${CMAKE_SOURCE_DIR}/drone/assets/vd-link.config DESTINATION /etc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
+        install(FILES ${CMAKE_SOURCE_DIR}/drone/assets/vd-link.config DESTINATION /etc
+                PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_WRITE)   # 0766
 else()
-    install(FILES ${CMAKE_SOURCE_DIR}/drone/assets/vd-link.config DESTINATION etc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)  # 0644
+        install(FILES ${CMAKE_SOURCE_DIR}/drone/assets/vd-link.config DESTINATION etc
+                PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_WRITE)  # 0766
 endif()
