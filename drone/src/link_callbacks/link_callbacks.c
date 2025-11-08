@@ -236,6 +236,22 @@ void link_rc_rx_callback(const uint16_t* channel_values, size_t channel_count)
     printf("\n");
 }
 
+static void update_rssi_on_fc(int rssi, int snr)
+{
+    update_telemetry_stats((int8_t)rssi, // Uplink RSSI 1
+                               0, // Uplink RSSI 2
+                               100,                       // Uplink quality (Placeholder)
+                               (int8_t)snr, // Uplink SNR
+                               0,                        // Downlink RSSI
+                               0,                        // Downlink quality
+                               0,                        // Downlink SNR
+                               0,                        // Active antenna
+                               0,                        // RF mode
+                               0                         // TX power
+                            ); // Placeholder values for downlink and other params.
+
+}
+
 void send_telemetry_update_thread_fn(void)
 {
     cpu_info_t cpu_info;
@@ -265,9 +281,11 @@ void send_telemetry_update_thread_fn(void)
                     telemetry.lte_signal.rsrq = lte_info.rsrq;
                     telemetry.lte_signal.rsrp = lte_info.rsrp;
                     telemetry.lte_signal.snr = lte_info.snr;
+                    update_rssi_on_fc((int)lte_info.rssi, (int)(lte_info.snr_valid ? lte_info.snr : 0));
                 } else if (strcmp(lte_info.type, "wcdma") == 0) {
                     telemetry.phy_type = LINK_PHY_TYPE_WCDMA;
                     telemetry.wcdma_signal.rssi = lte_info.rssi;
+                    update_rssi_on_fc((int)lte_info.rssi, 0);
                 } else {
                     telemetry.phy_type = LINK_PHY_TYPE_UNKNOWN;
                 }
@@ -286,7 +304,7 @@ void send_telemetry_update_thread_fn(void)
 
         link_send_sys_telemetry(&telemetry);
 
-        // msp_send_update_rssi();
+         send_telemetry_to_fc();
 
         sleep(5); // Send telemetry every 5 seconds
 #if 0

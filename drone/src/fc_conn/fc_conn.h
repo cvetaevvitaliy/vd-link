@@ -1,6 +1,7 @@
 #include "msp.h"
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef int (*msp_displayport_cb_t)(const char* buffer, size_t size);
 
@@ -18,3 +19,11 @@ const char* get_fc_version(void);
 const char* get_board_info(void);
 
 void disconnect_from_fc();
+
+// Telemetry functions
+void update_telemetry_stats(uint8_t uplink_rssi_1, uint8_t uplink_rssi_2, 
+                           uint8_t uplink_quality, int8_t uplink_snr,
+                           uint8_t downlink_rssi, uint8_t downlink_quality, 
+                           int8_t downlink_snr, uint8_t active_antenna, 
+                           uint8_t rf_mode, uint8_t tx_power);
+void send_telemetry_to_fc(void);

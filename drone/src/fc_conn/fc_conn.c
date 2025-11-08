@@ -13,6 +13,10 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <stdbool.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
 
 #define OSD_DEFAULT_CHAR_X    53
 #define OSD_DEFAULT_CHAR_Y    20
@@ -52,6 +56,23 @@ static volatile bool fc_ready = false;
 static struct timeval last_osd_time = {0};
 static volatile bool osd_received = false;
 static pthread_mutex_t osd_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// CRSF LinkStatistics structure for telemetry
+typedef struct {
+    uint8_t uplink_rssi_1;      // RSSI of antenna 1 (dBm + 130)
+    uint8_t uplink_rssi_2;      // RSSI of antenna 2 (dBm + 130)
+    uint8_t uplink_link_quality; // Uplink link quality (0-100%)
+    int8_t  uplink_snr;         // SNR (dB)
+    uint8_t active_antenna;     // Active antenna (0 or 1)
+    uint8_t rf_mode;           // RF mode (0-7)
+    uint8_t uplink_tx_power;   // TX power (0-8, actual power = 2^value mW)
+    uint8_t downlink_rssi;     // Downlink RSSI (dBm + 130)
+    uint8_t downlink_link_quality; // Downlink link quality (0-100%)
+    int8_t  downlink_snr;      // Downlink SNR (dB)
+} __attribute__((packed)) crsf_link_statistics_t;
+
+// Telemetry data
+static crsf_link_statistics_t link_stats = {0};
 
 static inline aggregated_buffer_t* aggr_cur(void)
 {
@@ -444,3 +465,52 @@ bool is_device_uid_ready(void)
 {
     return fc_properties.device_uid[0] != '\0';
 }
+
+// Update link statistics data
+void update_telemetry_stats(uint8_t uplink_rssi_1, uint8_t uplink_rssi_2, 
+                           uint8_t uplink_quality, int8_t uplink_snr,
+                           uint8_t downlink_rssi, uint8_t downlink_quality, 
+                           int8_t downlink_snr, uint8_t active_antenna, 
+                           uint8_t rf_mode, uint8_t tx_power)
+{
+    link_stats.uplink_rssi_1 = uplink_rssi_1;
+    link_stats.uplink_rssi_2 = uplink_rssi_2;
+    link_stats.uplink_link_quality = uplink_quality;
+    link_stats.uplink_snr = uplink_snr;
+    link_stats.downlink_rssi = downlink_rssi;
+    link_stats.downlink_link_quality = downlink_quality;
+    link_stats.downlink_snr = downlink_snr;
+    link_stats.active_antenna = active_antenna;
+    link_stats.rf_mode = rf_mode;
+    link_stats.uplink_tx_power = tx_power;
+}
+
+// Send telemetry to flight controller via UDP
+void send_telemetry_to_fc(void)
+{
+    static int udp_socket = -1;
+    static struct sockaddr_in fc_addr;
+    static bool addr_initialized = false;
+    
+    // Initialize socket and address on first call
+    if (udp_socket == -1) {
+        udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+        if (udp_socket < 0) {
+            perror("Failed to create UDP socket for FC telemetry");
+            return;
+        }
+    }
+    
+    if (!addr_initialized) {
+        memset(&fc_addr, 0, sizeof(fc_addr));
+        fc_addr.sin_family = AF_INET;
+        fc_addr.sin_port = htons(5613);
+        inet_pton(AF_INET, "127.0.0.1", &fc_addr.sin_addr);
+        addr_initialized = true;
+    }
+    
+    // Send the telemetry structure
+    sendto(udp_socket, &link_stats, sizeof(link_stats), 0,
+           (struct sockaddr*)&fc_addr, sizeof(fc_addr));
+}
+
