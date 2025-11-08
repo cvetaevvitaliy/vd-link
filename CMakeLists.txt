@@ -62,13 +62,6 @@ include_directories(${CMAKE_SOURCE_DIR}/lib/log)
 
 project(vd-link)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/ini)
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/link)
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/client)
-
-
 # Set target platform: "gs" (default) or "drone"
 set(PLATFORM "gs" CACHE STRING "Target platform: gs or drone")
 
@@ -78,6 +71,15 @@ add_definitions(-DPLATFORM=\"${PLATFORM}\")
 # Validate the PLATFORM value
 if(NOT PLATFORM STREQUAL "gs" AND NOT PLATFORM STREQUAL "drone")
     message(FATAL_ERROR "Unknown platform: ${PLATFORM}. Must be 'gs' or 'drone'")
+endif()
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/librtp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/msp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/ini)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/link)
+
+if (PLATFORM STREQUAL "drone")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/lib/client)
 endif()
 
 # Include platform-specific CMake configuration
