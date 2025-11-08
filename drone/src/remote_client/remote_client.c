@@ -69,6 +69,7 @@ int remote_client_init(const common_config_t* config) {
     strncpy(client_config.server_host, config->server_config.server_host, sizeof(client_config.server_host) - 1);
     client_config.server_port = config->server_config.server_port;
     strncpy(client_config.drone_id, config->server_config.drone_id, sizeof(client_config.drone_id) - 1);
+    strncpy(client_config.fc_variant, config->server_config.fc_variant, sizeof(client_config.fc_variant) - 1);
     client_config.heartbeat_interval = config->server_config.heartbeat_interval;
     
     strncpy(client_config.name, config->server_config.name, sizeof(client_config.name) - 1);

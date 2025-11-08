@@ -33,6 +33,7 @@ struct drone_client_config {
     char firmware_version[32];
     char hardware_version[32];
     char owner_id[32];
+    char fc_variant[5];
     bool video_capable;
     bool telemetry_capable;
     bool commands_capable;

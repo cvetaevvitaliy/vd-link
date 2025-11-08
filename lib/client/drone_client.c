@@ -285,6 +285,7 @@ static int register_drone(drone_client_handle_t* client) {
         "\"name\": \"%s\","
         "\"firmware_version\": \"%s\","
         "\"hardware_version\": \"%s\","
+        "\"fc_variant\": \"%s\","
         "\"owner_id\": \"%s\","
         "\"capabilities\": {"
             "\"video\": %s,"
@@ -296,6 +297,7 @@ static int register_drone(drone_client_handle_t* client) {
         client->config.name,
         client->config.firmware_version,
         client->config.hardware_version,
+        client->config.fc_variant,
         client->config.owner_id,
         client->config.video_capable ? "true" : "false",
         client->config.telemetry_capable ? "true" : "false",
@@ -469,6 +471,8 @@ void drone_client_config_init_default(drone_client_config_t* config) {
     strncpy(config->name, "VD Link Drone", sizeof(config->name) - 1);
     strncpy(config->firmware_version, "1.0.0", sizeof(config->firmware_version) - 1);
     strncpy(config->hardware_version, "Generic", sizeof(config->hardware_version) - 1);
+    strncpy(config->owner_id, "owner-unknown", sizeof(config->owner_id) - 1);
+    strncpy(config->fc_variant, "N/A", sizeof(config->fc_variant) - 1);
     
     config->video_capable = true;
     config->telemetry_capable = true;
