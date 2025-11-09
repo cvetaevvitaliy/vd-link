@@ -27,16 +27,26 @@ int fill_server_config_from_fc(server_connection_config_t* server_config, const 
         return -1;
     }
 
-    strncpy(server_config->drone_id, uid, sizeof(server_config->drone_id) - 1);
-    server_config->drone_id[sizeof(server_config->drone_id) - 1] = '\0';
-    strncpy(server_config->name, craft_name ? craft_name : uid, sizeof(server_config->name) - 1);
-    server_config->name[sizeof(server_config->name) - 1] = '\0';
-    strncpy(server_config->firmware_version, fc_version ? fc_version : "N/A", sizeof(server_config->firmware_version) - 1);
-    server_config->firmware_version[sizeof(server_config->firmware_version) - 1] = '\0';
-    strncpy(server_config->hardware_version, board_info ? board_info : "N/A", sizeof(server_config->hardware_version) - 1);
-    server_config->hardware_version[sizeof(server_config->hardware_version) - 1] = '\0';
-    strncpy(server_config->fc_variant, fc_variant ? fc_variant : "N/A", sizeof(server_config->fc_variant) - 1);
-    server_config->fc_variant[sizeof(server_config->fc_variant) - 1] = '\0';
+    if (uid && uid[0] != '\0') {
+        strncpy(server_config->drone_id, uid, sizeof(server_config->drone_id) - 1);
+        server_config->drone_id[sizeof(server_config->drone_id) - 1] = '\0';
+    }
+    if (craft_name && craft_name[0] != '\0') {
+        strncpy(server_config->name, craft_name, sizeof(server_config->name) - 1);
+        server_config->name[sizeof(server_config->name) - 1] = '\0';
+    }
+    if (fc_version && fc_version[0] != '\0') {
+        strncpy(server_config->firmware_version, fc_version, sizeof(server_config->firmware_version) - 1);
+        server_config->firmware_version[sizeof(server_config->firmware_version) - 1] = '\0';
+    }
+    if (board_info && board_info[0] != '\0') {
+        strncpy(server_config->hardware_version, board_info, sizeof(server_config->hardware_version) - 1);
+        server_config->hardware_version[sizeof(server_config->hardware_version) - 1] = '\0';
+    }
+    if (fc_variant && fc_variant[0] != '\0') {
+        strncpy(server_config->fc_variant, fc_variant, sizeof(server_config->fc_variant) - 1);
+        server_config->fc_variant[sizeof(server_config->fc_variant) - 1] = '\0';
+    }
 
     return 0;
 }

@@ -317,23 +317,6 @@ static int register_drone(drone_client_handle_t* client) {
         if (strstr(response, "HTTP/1.1 20") != NULL) {
             printf("Registration successful!\n");
             
-            char *session_start = strstr(response_body, "\"current_session_id\":");
-            if (session_start) {
-                session_start = strchr(session_start, '"');
-                if (session_start) {
-                    session_start++;
-                    char *session_end = strchr(session_start, '"');
-                    if (session_end) {
-                        size_t len = session_end - session_start;
-                        if (len < sizeof(client->session_id) - 1) {
-                            strncpy(client->session_id, session_start, len);
-                            client->session_id[len] = '\0';
-                            printf("Session ID: %s\n", client->session_id);
-                        }
-                    }
-                }
-            }
-            
             client->connected = true;
             client->registration_valid = true;
             if (client->status_callback) {

@@ -37,6 +37,11 @@ typedef struct {
     char fc_variant[5];
     char fc_version[16];
     char board_info[16];
+    bool uid_ready;
+    bool name_ready;
+    bool fc_variant_ready;
+    bool fc_version_ready;
+    bool board_info_ready;
 } fc_properties_t;
 
 typedef enum {
@@ -192,6 +197,15 @@ static void send_fc_tx_info(uint8_t rssi)
     printf("[MSP] FC TX Info sent with RSSI %u\n", rssi);
 }
 
+static void send_displayport_heartbeat(void)
+{
+    uint8_t buffer[10] = {0};
+    uint8_t cmd = MSP_DISPLAYPORT_KEEPALIVE;
+    int len = construct_msp_command_v1((uint8_t*)buffer, MSP_DISPLAYPORT, &cmd, sizeof(cmd), MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, sizeof(buffer));
+    // printf("[MSP] DisplayPort Keepalive sent\n");
+}
+
 void msp_send_update_rssi(int rssi)
 {
     send_fc_tx_info((uint8_t)rssi);
@@ -225,6 +239,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 
         strncpy(fc_properties.device_uid, uid_str, sizeof(fc_properties.device_uid) - 1);
         fc_properties.device_uid[sizeof(fc_properties.device_uid) - 1] = '\0';
+        fc_properties.uid_ready = true;
 
         printf("[MSP] Device UID received: %s\n", fc_properties.device_uid);
     }
@@ -232,6 +247,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     else if (msp_cmd == MSP_NAME) {
         memcpy(fc_properties.name, payload, data_size < 256 ? data_size : 256);
         fc_properties.name[sizeof(fc_properties.name) - 1] = '\0';
+        fc_properties.name_ready = true;
 
         printf("[MSP] Device Name received: %s\n", fc_properties.name);
     }
@@ -239,6 +255,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     else if (msp_cmd == MSP_FC_VARIANT) {
         memcpy(fc_properties.fc_variant, payload, data_size < sizeof(fc_properties.fc_variant) ? data_size : sizeof(fc_properties.fc_variant));
         fc_properties.fc_variant[sizeof(fc_properties.fc_variant) - 1] = '\0';
+        fc_properties.fc_variant_ready = true;
 
         printf("[MSP] FC Variant received: %s\n", fc_properties.fc_variant);
     }
@@ -246,6 +263,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     else if (msp_cmd == MSP_FC_VERSION) {
         sprintf(fc_properties.fc_version, "%d.%d.%d",
                 payload[0], payload[1], payload[2]);
+        fc_properties.fc_version_ready = true;
         printf("[MSP] FC Version received: %s\n", fc_properties.fc_version);
     }
 
@@ -260,6 +278,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         if (data_size >= 2) {
             memcpy(fc_properties.board_info, payload, data_size < sizeof(fc_properties.board_info) ? data_size : sizeof(fc_properties.board_info));
             fc_properties.board_info[data_size] = '\0';
+            fc_properties.board_info_ready = true;
             printf("[MSP] Board Info received: %s\n", fc_properties.board_info);
         }
     }
@@ -283,6 +302,14 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         case MSP_DISPLAYPORT_DRAW_STRING: // 3 -> Draw String
             break;
         case MSP_DISPLAYPORT_DRAW_SCREEN: // 4 -> Draw Screen
+         if (fc_properties.fc_variant_ready && fc_properties.fc_variant[0] == 'I') // INAV variant
+            {
+                /* Send DisplayPort heartbeat only after we receive all FC properties
+                   In other case FC could not answer to our requests intime */
+                if (fc_ready) {
+                    send_displayport_heartbeat();
+                }
+            }
             break;
         case MSP_DISPLAYPORT_SET_OPTIONS: // 5 -> Set Options (HDZero/iNav)
             break;
@@ -317,21 +344,16 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 
     pthread_mutex_unlock(&aggr_mutex);
 
+    /* Send selected MSP command path through to Ground Station */
     switch (msp_cmd) {
-    case MSP_DISPLAYPORT:
-    case MSP_FC_VERSION:
-    case MSP_UID:
-    case MSP_API_VERSION:
-    case MSP_BOARD_INFO:
-        break;
-    default: {
-        uint8_t buffer[256] = {0};
-        int cmd_len = construct_msp_command_v1(buffer, msp_cmd, 0, 0, MSP_OUTBOUND);
-        if (cmd_len > 0) {
-            msp_interface_write(&msp_interface, buffer, sizeof(buffer));
+    case MSP_FC_VARIANT: 
+    // case OTHER_MSP_COMMAND_YOU_WANT_TO_FORWARD:
+        {
+            char variant_str[257] = {0};
+            memcpy(variant_str, payload, data_size < 256 ? data_size : 256);
+            printf("[MSP] FC Variant received: %s\n", variant_str);
+            break;
         }
-    }
-        break;
     }
 }
 
@@ -361,13 +383,19 @@ static void* fc_read_thread_fn(void *arg)
         memset(aggregation_buffer[1].buffer, 0, aggregation_mtu);
     }
 
+
     int step = 0;
     while (run) {
-        if (!fc_ready) {
-            send_variant_request();
+        if (!is_all_fc_properties_ready()) {
             request_fc_info();
             usleep(500 * 1000);
-            fc_ready = true;
+        } else {
+            if (!fc_ready) {
+                printf("[MSP] All FC properties are ready\n");
+                fc_ready = true;
+                send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+            }
+            break;
         }
 
         int ret = msp_interface_read(&msp_interface, &run);
@@ -377,6 +405,9 @@ static void* fc_read_thread_fn(void *arg)
             } else {
                 fprintf(stderr, "[MSP] UART receive error (%d)\n", ret);
                 fc_ready = false;
+                // Very rare case. Detect whether FC was reflashed to another firmware
+                // Maybe need to request all info again?
+                fc_properties.fc_variant_ready = false;
             }
         }
     }
@@ -387,13 +418,22 @@ static void* fc_read_thread_fn(void *arg)
 
 int request_fc_info(void)
 {
-    
-    send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
-    send_uid_request();
-    send_name_request();
-    send_api_version_request();
-    send_fc_version_request();
-    send_board_info_request();
+    //send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
+    if (!fc_properties.uid_ready) {
+        send_uid_request();
+    }
+    if (!fc_properties.name_ready) {
+        send_name_request();
+    }
+    if (!fc_properties.fc_version_ready) {
+        send_fc_version_request();
+    }
+    if (!fc_properties.board_info_ready) {
+        send_board_info_request();
+    }
+    if (!fc_properties.fc_variant_ready) {
+        send_variant_request();
+    }
 
     return 0;
 }
@@ -468,9 +508,13 @@ const char* get_board_info(void)
     return fc_properties.board_info[0] ? fc_properties.board_info : NULL;
 }
 
-bool is_device_uid_ready(void)
+bool is_all_fc_properties_ready(void)
 {
-    return fc_properties.device_uid[0] != '\0';
+    return fc_properties.uid_ready &&
+           fc_properties.name_ready &&
+           fc_properties.fc_variant_ready &&
+           fc_properties.fc_version_ready &&
+           fc_properties.board_info_ready;
 }
 
 // Update link statistics data

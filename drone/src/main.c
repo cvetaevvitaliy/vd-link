@@ -186,26 +186,23 @@ int main(int argc, char *argv[])
 
         // Wait a bit for MSP_UID response
         printf("Waiting for flight controller UID...\n");
-        for (int i = 0; i < 20; i++) { // Wait up to 2 seconds
-            if (is_device_uid_ready()) {
-                const char* uid = get_device_uid();
-                if (uid) {
-                    printf("Got FC device UID: %s\n", uid);
-                    fill_server_config_from_fc(&config.server_config,
-                                            get_fc_variant(),
-                                            get_board_info(),
-                                            get_fc_version(),
-                                            get_craft_name(),
-                                            uid);
-                }
-                break;
+        for (int i = 0; i < 10; i++) { // Wait up to 5 seconds
+            if (is_all_fc_properties_ready()) {
+                printf("Got all FC properties\n");
+            break;
             }
-            usleep(100 * 1000); // 100ms
+            usleep(500 * 1000); // 500ms
         }
+        if (!is_all_fc_properties_ready()) {
+            printf("Warning: Could not get all FC properties, using config value for missed properties\n");
+        }
+        fill_server_config_from_fc(&config.server_config,
+                                        get_fc_variant(),
+                                        get_board_info(),
+                                        get_fc_version(),
+                                        get_craft_name(),
+                                        get_device_uid());
         
-        if (!is_device_uid_ready()) {
-            printf("Warning: Could not get FC device UID, using config value\n");
-        }
     }
 
     // Initialize remote client (optional, based on config) before RTP streamer
