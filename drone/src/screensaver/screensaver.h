@@ -37,6 +37,9 @@ int screensaver_create_nv12_checker(int w, int h, int block,
                                     uint8_t y1, uint8_t u1, uint8_t v1,
                                     screensaver_nv12_t *out);
 
+/* Prepare a "No Camera" screensaver NV12 image
+*/
+int screensaver_prepare_no_camera_screen(int width, int height, screensaver_nv12_t *out);
 /**
  * Free buffer allocated by any screensaver_create_* function.
  * Safe to call with NULL or already-empty descriptor.

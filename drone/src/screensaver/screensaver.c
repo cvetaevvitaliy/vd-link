@@ -101,3 +101,123 @@ void screensaver_free(screensaver_nv12_t *img)
     img->size_bytes = 0;
 }
 
+// No camera icon bitmap (32x32 pixels)
+static const uint8_t no_camera_bitmap[] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x20, 
+    0x20, 0x00, 0x00, 0x40, 0x10, 0x00, 0x00, 0x80, 0x08, 0x00, 0x01, 0x00, 0x04, 0x00, 0x02, 0x00, 
+    0x02, 0x00, 0x04, 0x00, 0x1f, 0xff, 0xff, 0x80, 0x10, 0x80, 0x10, 0x82, 0x10, 0x40, 0x20, 0x86, 
+    0x10, 0x20, 0x40, 0x8a, 0x10, 0x10, 0x80, 0x92, 0x10, 0x09, 0x00, 0xa2, 0x10, 0x06, 0x00, 0xc2, 
+    0x10, 0x06, 0x00, 0xc2, 0x10, 0x09, 0x00, 0xa2, 0x10, 0x10, 0x80, 0x92, 0x10, 0x20, 0x40, 0x8a, 
+    0x10, 0x40, 0x20, 0x86, 0x10, 0x80, 0x10, 0x82, 0x1f, 0xff, 0xff, 0x80, 0x02, 0x00, 0x04, 0x00, 
+    0x04, 0x00, 0x02, 0x00, 0x08, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x80, 0x20, 0x00, 0x00, 0x40, 
+    0x40, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+// Helper function to draw a thick pixel (NxN square)
+static void draw_thick_pixel_nv12(screensaver_nv12_t *img, int x, int y, int thickness,
+                                 uint8_t y_col, uint8_t u_col, uint8_t v_col) {
+    if (!img || !img->data) return;
+    
+    size_t y_size = (size_t)img->width * (size_t)img->height;
+    uint8_t *y_plane = img->data;
+    uint8_t *uv_plane = img->data + y_size;
+    
+    int half_thick = thickness / 2;
+    
+    for (int dy = -half_thick; dy <= half_thick; dy++) {
+        for (int dx = -half_thick; dx <= half_thick; dx++) {
+            int px = x + dx;
+            int py = y + dy;
+            
+            // Check bounds
+            if (px >= 0 && px < img->width && py >= 0 && py < img->height) {
+                // Draw Y pixel
+                y_plane[py * img->width + px] = y_col;
+                
+                // Draw UV pixels (subsampled)
+                if ((px & 1) == 0 && (py & 1) == 0) {
+                    int uv_x = px / 2;
+                    int uv_y = py / 2;
+                    int uv_stride = img->width / 2;
+                    
+                    if (uv_x < uv_stride && uv_y < (img->height / 2)) {
+                        int uv_offset = (uv_y * uv_stride + uv_x) * 2;
+                        uv_plane[uv_offset + 0] = u_col;
+                        uv_plane[uv_offset + 1] = v_col;
+                    }
+                }
+            }
+        }
+    }
+}
+
+int screensaver_add_no_camera_bmp_nv12(screensaver_nv12_t *img, const char *text, int x, int y,
+                                       uint8_t y_col, uint8_t u_col, uint8_t v_col)
+{
+    // Draw the "No Camera" bitmap icon
+    if (!img || !img->data) return -1;
+    
+    // Bitmap parameters
+    const int bitmap_width = 32;   // Original bitmap is 32x32 pixels
+    const int bitmap_height = 32;
+    const int scale_factor = 8;    // Scale up 8x for better visibility
+    const int line_thickness = 3;  // Make lines thicker
+    
+    // Calculate scaled dimensions
+    int scaled_width = bitmap_width * scale_factor;
+    int scaled_height = bitmap_height * scale_factor;
+    
+    // Center the icon if x,y are at center of image
+    int start_x = x - scaled_width / 2;
+    int start_y = y - scaled_height / 2;
+    
+    // Draw the bitmap
+    for (int row = 0; row < bitmap_height; row++) {
+        for (int col = 0; col < bitmap_width; col++) {
+            // Get the byte index and bit position
+            int byte_index = (row * bitmap_width + col) / 8;
+            int bit_index = 7 - ((row * bitmap_width + col) % 8);
+            
+            // Check if this pixel should be drawn
+            if (no_camera_bitmap[byte_index] & (1 << bit_index)) {
+                // Calculate scaled pixel position
+                int pixel_x = start_x + (col * scale_factor);
+                int pixel_y = start_y + (row * scale_factor);
+                
+                // Draw scaled pixel block with thickness
+                for (int sy = 0; sy < scale_factor; sy++) {
+                    for (int sx = 0; sx < scale_factor; sx++) {
+                        draw_thick_pixel_nv12(img, 
+                                             pixel_x + sx, 
+                                             pixel_y + sy, 
+                                             line_thickness,
+                                             y_col, u_col, v_col);
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+int screensaver_prepare_no_camera_screen(int width, int height, screensaver_nv12_t *out)
+{
+    int ret = screensaver_create_nv12_solid(width, height,
+                                    0x10 /*Y black*/, 0x80 /*U*/, 0x80 /*V*/,
+                                    out);
+    if (ret != 0) {
+        printf("Failed to create screensaver frame\n");
+        return ret;
+    }
+    // Add "Camera Not Found" text to screensaver
+    ret = screensaver_add_no_camera_bmp_nv12(out, "Camera Not Found", 
+                                width / 2 - 100, height / 2 - 10,
+                                0xFF, 0x80, 0x80); // White text
+    if (ret != 0) {
+        printf("Failed to add text to screensaver\n");
+        screensaver_free(out);
+        return ret; 
+    }
+    return 0;
+}

@@ -260,6 +260,9 @@ int main(int argc, char *argv[])
     ret = rtp_streamer_init(&config);
     if (ret != 0) {
         printf("Failed to initialize RTP streamer\n");
+        remote_client_stop();
+        remote_client_cleanup();
+        proxy_cleanup();
         config_cleanup(&config);
         return -1;
     }
@@ -268,6 +271,9 @@ int main(int argc, char *argv[])
     if (ret != 0) {
         printf("Failed to initialize encoder\n");
         rtp_streamer_deinit();
+        remote_client_stop();
+        remote_client_cleanup();
+        proxy_cleanup();
         config_cleanup(&config);
         return -1;
     }
@@ -277,6 +283,9 @@ int main(int argc, char *argv[])
         printf("Failed to initialize link\n");
         encoder_clean();
         rtp_streamer_deinit();
+        remote_client_stop();
+        remote_client_cleanup();
+        proxy_cleanup();
         config_cleanup(&config);
         return -1;
     }
@@ -290,6 +299,9 @@ int main(int argc, char *argv[])
         printf("Failed to start telemetry thread\n");
         encoder_clean();
         rtp_streamer_deinit();
+        remote_client_stop();
+        remote_client_cleanup();
+        proxy_cleanup();
         config_cleanup(&config);
         return -1;
     }
@@ -298,28 +310,21 @@ int main(int argc, char *argv[])
     ret = link_start_rtt_check(5000); // Send keepalive every 5 seconds
     if (ret != 0) {
         printf("Failed to start keepalive thread\n");
-        encoder_clean();
-        rtp_streamer_deinit();
-        config_cleanup(&config);
-        return -1;
+        /* Not a critical issue, continue working */
     }
 
     /* Init and bind camera to encoder */
     ret = camera_select_camera(&camera_manager, &config, primary_camera);
     if (ret != 0) {
         printf("Failed to initialize primary camera\n");
-        encoder_clean();
-        rtp_streamer_deinit();
-        config_cleanup(&config);
-        return -1;
+        /* Not a critical issue, continue working */
     }
 
     /*If no camera is detected, use screensaver */
-    if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
+    if (!camera_manager_get_current_camera(&camera_manager)) {
         printf("No camera detected, using screensaver\n");
-        if (screensaver_create_nv12_solid(config.stream_width, config.stream_height,
-                                    0x10 /*Y black*/, 0x80 /*U*/, 0x80 /*V*/,
-                                    &screensaver) != 0) {
+        int ret = screensaver_prepare_no_camera_screen(config.stream_width, config.stream_height, &screensaver);
+        if (ret != 0) {
             printf("Failed to create screensaver frame\n");
             encoder_clean();
             rtp_streamer_deinit();
@@ -330,14 +335,14 @@ int main(int argc, char *argv[])
 
     running = true;
     while (running) {
-        if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
+        if (!camera_manager_get_current_camera(&camera_manager)) {
             encoder_manual_push_frame(&config.encoder_config, screensaver.data, (int)screensaver.size_bytes);
         }
         usleep(16 * 1000);
     }
 
     /* Deinit camera */
-    if (!camera_manager_get_current_camera(&camera_manager)->is_available) {
+    if (!camera_manager_get_current_camera(&camera_manager)) {
         screensaver_free(&screensaver);
     } else {
         camera_manager_unbind_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
