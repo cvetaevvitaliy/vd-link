@@ -568,14 +568,36 @@ int drone_client_start(drone_client_handle_t* client) {
     if (client->running) return DRONE_CLIENT_SUCCESS;
     
     // Connect first if not connected
-    int retries = 5;
-    while (!client->connected && retries > 0) {
+    int max_retries = client->config.max_retries;
+    int attempt = 0;
+    int delay = client->config.timeout_seconds > 0 ? client->config.timeout_seconds : 2; // Fixed delay
+    bool infinite_retries = (max_retries == 0);
+    
+    while (!client->connected) {
+        attempt++;
+        
+        if (infinite_retries) {
+            printf("[DRONE_CLIENT] Connection attempt %d (infinite retries)...\n", attempt);
+        } else {
+            printf("[DRONE_CLIENT] Connection attempt %d/%d...\n", attempt, max_retries);
+        }
+        
         int ret = drone_client_connect(client);
         if (ret == DRONE_CLIENT_SUCCESS) {
+            printf("[DRONE_CLIENT] Connected on attempt %d\n", attempt);
             break;
         }
-        retries--;
-        sleep(1); // Wait before retrying
+        
+        printf("[DRONE_CLIENT] Connection attempt %d failed: %s\n", attempt, client->last_error);
+        
+        // Check if we should stop trying (only for non-infinite retries)
+        if (!infinite_retries && attempt >= max_retries) {
+            printf("[DRONE_CLIENT] Reached maximum retry attempts (%d)\n", max_retries);
+            break;
+        }
+        
+        printf("[DRONE_CLIENT] Retrying in %d seconds...\n", delay);
+        sleep(delay);
     }
 
     client->running = true;

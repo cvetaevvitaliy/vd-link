@@ -81,6 +81,8 @@ int remote_client_init(const common_config_t* config) {
     strncpy(client_config.drone_id, config->server_config.drone_id, sizeof(client_config.drone_id) - 1);
     strncpy(client_config.fc_variant, config->server_config.fc_variant, sizeof(client_config.fc_variant) - 1);
     client_config.heartbeat_interval = config->server_config.heartbeat_interval;
+    client_config.max_retries = config->server_config.server_connect_max_retries;
+    client_config.timeout_seconds = config->server_config.server_connect_retry_delay;
     
     strncpy(client_config.name, config->server_config.name, sizeof(client_config.name) - 1);
     strncpy(client_config.firmware_version, config->server_config.firmware_version, sizeof(client_config.firmware_version) - 1);
@@ -114,17 +116,12 @@ int remote_client_start(void) {
     
     printf("[REMOTE_CLIENT] Starting connection...\n");
     
-    if (drone_client_connect(g_client) != DRONE_CLIENT_SUCCESS) {
-        printf("[REMOTE_CLIENT] Failed to connect: %s\n", drone_client_get_last_error(g_client));
+    if (drone_client_start(g_client) != DRONE_CLIENT_SUCCESS) {
+        printf("[REMOTE_CLIENT] Failed to start: %s\n", drone_client_get_last_error(g_client));
         return -1;
     }
     
     printf("[REMOTE_CLIENT] Connected, session: %s\n", drone_client_get_session_id(g_client));
-    
-    if (drone_client_start(g_client) != DRONE_CLIENT_SUCCESS) {
-        printf("[REMOTE_CLIENT] Failed to start heartbeat: %s\n", drone_client_get_last_error(g_client));
-        return -1;
-    }
     
     drone_client_send_status(g_client, "online");
     

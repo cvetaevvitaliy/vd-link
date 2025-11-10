@@ -327,6 +327,8 @@ DEF_SETTER_INT  (set_server_port,       cfg->server_config.server_port, 1, 65535
 DEF_SETTER_STR  (set_server_drone_id,   cfg->server_config.drone_id, sizeof(cfg->server_config.drone_id), "server.drone_id")
 DEF_SETTER_INT  (set_server_heartbeat,  cfg->server_config.heartbeat_interval, 5, 300, "server.heartbeat_interval")
 DEF_SETTER_STR  (set_server_owner_id,   cfg->server_config.owner_id, sizeof(cfg->server_config.owner_id), "server.owner_id")
+DEF_SETTER_INT  (set_server_max_retries, cfg->server_config.server_connect_max_retries, 0, 50, "server.max_connect_retries")
+DEF_SETTER_INT  (set_server_retry_delay, cfg->server_config.server_connect_retry_delay, 1, 60, "server.initial_retry_delay")
 
 
 // video (common resolution for camera, encoder, stream)
@@ -417,6 +419,8 @@ static const config_entry_t CONFIG_TABLE[] = {
     MAP("server", "drone_id",                       set_server_drone_id),
     MAP("server", "owner_id",                       set_server_owner_id),
     MAP("server", "heartbeat_interval",             set_server_heartbeat),
+    MAP("server", "max_connect_retries",            set_server_max_retries),
+    MAP("server", "initial_retry_delay",            set_server_retry_delay),
 };
 
 #define CONFIG_TABLE_LEN (sizeof(CONFIG_TABLE)/sizeof(CONFIG_TABLE[0]))
@@ -670,6 +674,10 @@ int config_save(const char *path, common_config_t *cfg)
                 strncpy(value_str, cfg->server_config.owner_id, sizeof(value_str) - 1);
             } else if (str_ieq(key, "heartbeat_interval")) {
                 snprintf(value_str, sizeof(value_str), "%d", cfg->server_config.heartbeat_interval);
+            } else if (str_ieq(key, "max_connect_retries")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->server_config.server_connect_max_retries);
+            } else if (str_ieq(key, "initial_retry_delay")) {
+                snprintf(value_str, sizeof(value_str), "%d", cfg->server_config.server_connect_retry_delay);
             }
         }
 
@@ -740,6 +748,10 @@ void config_init_defaults(common_config_t *cfg)
     cfg->server_config.heartbeat_interval = 30;
     strncpy(cfg->server_config.owner_id, "owner-unknown", sizeof(cfg->server_config.owner_id) - 1);
     cfg->server_config.owner_id[sizeof(cfg->server_config.owner_id) - 1] = '\0';
+    
+    // Connection retry defaults
+    cfg->server_config.server_connect_max_retries = 10;   // Try 10 times by default
+    cfg->server_config.server_connect_retry_delay = 2;    // Retry with 2 seconds delay
 
 }
 

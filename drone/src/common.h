@@ -107,6 +107,8 @@ typedef struct {
     char hardware_version[32]; // Hardware version from flight controller (STF4, etc.)
     char fc_variant[5]; // Flight controller variant (BTFL, etc.)
     char owner_id[32]; // Owner ID from config (e.g., default, user123)
+    int server_connect_retry_delay;    // Delay between retry attempts (seconds)
+    int server_connect_max_retries;    // Maximum number of connection attempts
 } server_connection_config_t;
 
 typedef struct {
