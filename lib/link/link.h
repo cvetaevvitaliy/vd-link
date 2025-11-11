@@ -118,8 +118,11 @@ typedef enum {
     LINK_SUBCMD_SATURATION,   /* int32_t saturation */
     LINK_SUBCMD_SHARPNESS,    /* int32_t sharpness */
     LINK_SUBCMD_HDR,          /* uint32_t hdr_enabled */
+    LINK_SUBCMD_MIRROR_FLIP,  /* uint32_t mirror_enabled; uint32_t flip_enabled */
 
     LINK_SUBCMD_SAVE_PERSISTENT, /* Save current config to persistent storage */
+    LINK_SUBCMD_RESTORE_DEFAULT, /* Restore default config from persistent storage */
+    LINK_SUBCMD_REBOOT,          /* uint32_t 1: vision, 2: vd-link */
     LINK_SUBCMD_LAST
 } link_subcommand_id_t;
 

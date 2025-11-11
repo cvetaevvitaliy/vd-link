@@ -11,6 +11,7 @@
 #include "hal/transport.h"
 #include "fc_conn/fc_conn.h"
 #include "config/config_parser.h"
+#include "camera/isp/sample_common.h"
 
 static volatile bool running;
 static pthread_t telemetry_thread;
@@ -88,14 +89,14 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
         case LINK_SUBCMD_FOCUS_MODE:
             // Handle focus mode command
             if (cmd_id == LINK_CMD_GET) {
-                uint32_t focus_mode_quality = config.encoder_config.encoder_focus_mode.focus_quality;
+                int32_t focus_mode_quality = config.encoder_config.encoder_focus_mode.focus_quality;
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FOCUS_MODE, &focus_mode_quality, sizeof(focus_mode_quality));
             }
             else if (cmd_id == LINK_CMD_SET) {
-                uint32_t focus_mode_quality = *(uint32_t*)data;
+                int32_t focus_mode_quality = *(int32_t*)data;
                 config.encoder_config.encoder_focus_mode.focus_quality = focus_mode_quality;
                 encoder_focus_mode(&config.encoder_config);
-                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FOCUS_MODE, NULL, 0);
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FOCUS_MODE, &focus_mode_quality, sizeof(focus_mode_quality));
             }
             break;
         case LINK_SUBCMD_FPS:
@@ -136,17 +137,6 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                     }
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_BITRATE, &old_bitrate, sizeof(old_bitrate));
                 }
-            }
-            break;
-        case LINK_SUBCMD_HDR:
-            if (cmd_id == LINK_CMD_GET) {
-                bool hdr_enabled = *(bool*)data;
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
-            }
-            else if (cmd_id == LINK_CMD_SET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
             }
             break;
         case LINK_SUBCMD_GOP:
@@ -216,6 +206,109 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 // Save current configuration to persistent storage
                 config_save("/etc/vd-link.config", &config);
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SAVE_PERSISTENT, NULL, 0);
+            }
+            break;
+        case LINK_SUBCMD_BRIGHTNESS:
+            {
+                int32_t value = *(int32_t*)data;
+                if (cmd_id == LINK_CMD_SET) {
+                    SAMPLE_COMM_ISP_SET_Brightness(config.camera_csi_config.cam_id, value);
+                    config.camera_csi_config.brightness = value;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                } else if (cmd_id == LINK_CMD_GET) {
+                    int32_t current_value = config.camera_csi_config.brightness;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
+                }
+            }
+            break;
+        case LINK_SUBCMD_CONTRAST:
+            {
+                int32_t value = *(int32_t*)data;
+                if (cmd_id == LINK_CMD_SET) {
+                    SAMPLE_COMM_ISP_SET_Contrast(config.camera_csi_config.cam_id, (uint32_t)value);
+                    config.camera_csi_config.contrast = value;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                } else if (cmd_id == LINK_CMD_GET) {
+                    int32_t current_value = config.camera_csi_config.contrast;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
+                }
+            }
+            break;
+        case LINK_SUBCMD_SATURATION:
+            {
+                int32_t value = *(int32_t*)data;
+                if (cmd_id == LINK_CMD_SET) {
+                    SAMPLE_COMM_ISP_SET_Saturation(config.camera_csi_config.cam_id, (uint32_t)value);
+                    config.camera_csi_config.saturation = value;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                } else if (cmd_id == LINK_CMD_GET) {
+                    int32_t current_value = config.camera_csi_config.saturation;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
+                }
+            }
+            break;
+        case LINK_SUBCMD_SHARPNESS:
+            {
+                int32_t value = *(int32_t*)data;
+                if (cmd_id == LINK_CMD_SET) {
+                    SAMPLE_COMM_ISP_SET_Sharpness(config.camera_csi_config.cam_id, (uint32_t)value);
+                    config.camera_csi_config.sharpness = value;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                } else if (cmd_id == LINK_CMD_GET) {
+                    int32_t current_value = config.camera_csi_config.sharpness;
+                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
+                }
+            }
+            break;
+        case LINK_SUBCMD_HDR:
+            if (cmd_id == LINK_CMD_GET) {
+                bool hdr_enabled = *(bool*)data;
+                /* Not implemented */
+                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
+            }
+            else if (cmd_id == LINK_CMD_SET) {
+                /* Not implemented */
+                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
+            }
+            break;
+        case LINK_SUBCMD_MIRROR_FLIP:
+            if (cmd_id == LINK_CMD_GET) {
+                uint32_t mirror_flip = 0;
+                mirror_flip |= (config.camera_csi_config.mirror ? 0x01 : 0x00);
+                mirror_flip |= (config.camera_csi_config.flip ? 0x02 : 0x00);
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_MIRROR_FLIP, &mirror_flip, sizeof(mirror_flip));
+            }
+            else if (cmd_id == LINK_CMD_SET) {
+                uint32_t mirror_flip = *(uint32_t*)data;
+                config.camera_csi_config.mirror = (mirror_flip & 0x01) ? true : false;
+                config.camera_csi_config.flip = (mirror_flip & 0x02) ? true : false;
+                SAMPLE_COMM_ISP_SET_mirror(config.camera_csi_config.cam_id, mirror_flip);
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_MIRROR_FLIP, &mirror_flip, sizeof(mirror_flip));
+            }
+            break;
+        case LINK_SUBCMD_RESTORE_DEFAULT:
+            if (cmd_id == LINK_CMD_SET) {
+                // Restore default configuration from persistent storage
+                config_load("/etc/vd-link.default.config", &config);
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_RESTORE_DEFAULT, NULL, 0);
+            }
+            break;
+        case LINK_SUBCMD_REBOOT:
+            if (cmd_id == LINK_CMD_SET) {
+                uint32_t reboot_target = *(uint32_t*)data;
+                printf("Reboot command received for target: %u\n", reboot_target);
+                // Perform reboot based on target
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_REBOOT, &reboot_target, sizeof(reboot_target));
+                sleep(1); // Give some time for the ACK to be sent
+                if (reboot_target == 1) {
+                    // Reboot vision system
+                    system("/etc/init.d/S90vd-link stop");
+                    sleep(1);
+                    system("reboot");
+                } else if (reboot_target == 2) {
+                    // Reboot vd-link system
+                    system("/etc/init.d/S90vd-link restart");
+                }
             }
             break;
         // Handle other commands...
