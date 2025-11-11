@@ -157,11 +157,6 @@ static void send_aggregated_buffer(void)
 
 static void send_display_size(uint8_t canvas_size_x, uint8_t canvas_size_y)
 {
-    if (!run || !fc_ready) {
-        printf("[MSP] Interface not ready, skipping canvas size request\n");
-        return;
-    }
-    
     uint8_t buffer[256] = {0}; // Initialize buffer
     uint8_t payload[2] = {canvas_size_x, canvas_size_y};
     int len = construct_msp_command_v1(buffer, MSP_SET_OSD_CANVAS, payload, 2, MSP_OUTBOUND);
@@ -427,7 +422,6 @@ static void* fc_read_thread_fn(void *arg)
                 fc_ready = true;
                 send_display_size(OSD_DEFAULT_CHAR_X, OSD_DEFAULT_CHAR_Y);
             }
-            break;
         }
 
         int ret = msp_interface_read(&msp_interface, &run);
