@@ -38,7 +38,7 @@ typedef struct {
     char name[64];
     char fc_variant[5];
     char fc_version[16];
-    char board_info[16];
+    char board_info[64];
     bool uid_ready;
     bool name_ready;
     bool fc_variant_ready;
@@ -303,10 +303,24 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 
     else if (msp_cmd == MSP_BOARD_INFO) {
         if (data_size >= 2) {
-            memcpy(fc_properties.board_info, payload, data_size < sizeof(fc_properties.board_info) ? data_size : sizeof(fc_properties.board_info));
-            fc_properties.board_info[data_size] = '\0';
-            fc_properties.board_info_ready = true;
-            printf("[MSP] Board Info received: %s\n", fc_properties.board_info);
+            if (memcmp(payload, "ARDU", 4) == 0) {
+                printf("[MSP] Detected ArduPilot board info\n");
+                uint16_t hw_version = (uint16_t)(payload[4] | (payload[5] << 8));
+                uint8_t aio_flags = payload[6];
+                uint8_t capabilities = payload[7];
+                uint8_t fw_string_len = payload[8];
+                if (fw_string_len > 0 && fw_string_len <= data_size - 9) {
+                    memcpy(fc_properties.board_info, &payload[9], fw_string_len < sizeof(fc_properties.board_info) - 1 ? fw_string_len : sizeof(fc_properties.board_info) - 1);
+                    fc_properties.board_info[fw_string_len] = '\0';
+                    fc_properties.board_info_ready = true;
+                    printf("[MSP] ArduPilot Board Info received: %s\n", fc_properties.board_info);
+                }
+            } else {
+                memcpy(fc_properties.board_info, payload, data_size < sizeof(fc_properties.board_info) ? data_size : sizeof(fc_properties.board_info));
+                fc_properties.board_info[data_size] = '\0';
+                fc_properties.board_info_ready = true;
+                printf("[MSP] Board Info received: %s\n", fc_properties.board_info);
+            }
         }
     }
 
@@ -522,6 +536,13 @@ const char* get_device_uid(void)
 
 const char* get_craft_name(void)
 {
+    if (fc_properties.fc_variant_ready && !strncmp(fc_properties.fc_variant, "ARDU", 4)) {
+        if (fc_properties.uid_ready)
+            sprintf(fc_properties.name, "Ardu-%s", fc_properties.device_uid);
+        else {
+            return "Ardu-Untitled";
+        }
+    }
     return fc_properties.name[0] ? fc_properties.name : NULL;
 }
 
