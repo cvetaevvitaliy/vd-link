@@ -120,7 +120,7 @@ int msp_interface_init(msp_interface_t* dev)
     if (open_serial_port(dev) != MSP_INTERFACE_OK) {
         return MSP_INTERFACE_ERROR_UART;
     }
-    msp_interface_write(dev, "NULL", 4); // just to open the port
+    msp_interface_write(dev, "\0", 1); // just to open the port
 
     msp_port.callback = dev->cb;
 
@@ -129,6 +129,7 @@ int msp_interface_init(msp_interface_t* dev)
 
 int msp_interface_write(msp_interface_t* dev, uint8_t* buff, int len)
 {
+    printf("[MSP] Writing %d bytes to FC (%s)\n", len, buff);
     ssize_t result = write(dev->uart_fd, buff, len);
     if (result != (ssize_t)len) {
         perror("failed to write to port");
