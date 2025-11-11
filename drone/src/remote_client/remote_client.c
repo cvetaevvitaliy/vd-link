@@ -34,6 +34,8 @@ int fill_server_config_from_fc(server_connection_config_t* server_config, const 
     if (craft_name && craft_name[0] != '\0') {
         strncpy(server_config->name, craft_name, sizeof(server_config->name) - 1);
         server_config->name[sizeof(server_config->name) - 1] = '\0';
+    }else {
+        snprintf(server_config->name, sizeof(server_config->name),"Drone-%s", uid ? uid : "unknown");
     }
     if (fc_version && fc_version[0] != '\0') {
         strncpy(server_config->firmware_version, fc_version, sizeof(server_config->firmware_version) - 1);
