@@ -20,6 +20,8 @@
 
 #define OSD_DEFAULT_CHAR_X    53
 #define OSD_DEFAULT_CHAR_Y    20
+#define SEND_OSD_ON_CHANGE_ONLY 0
+#define MSP_AGGREGATION_TIMEOUT_MSEC 1500
 
 #ifndef MSP_AGGR_MTU
 #define MSP_AGGR_MTU          ((3 + 1 + 1 + 255 + 1)*2)  /* "$M<|> len cmd payload cksum" * 2 full frames */
@@ -63,6 +65,10 @@ static pthread_mutex_t aggr_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0, 0}, {NULL, 0, 0}};
 static uint8_t current_aggregation_buffer = 0;
+#if SEND_OSD_ON_CHANGE_ONLY
+static uint16_t aggregation_timeout = MSP_AGGREGATION_TIMEOUT_MSEC;
+static uint64_t last_aggregation_send = 0;
+#endif
 static uint16_t aggregation_mtu = MSP_AGGR_MTU;
 static msp_interface_t msp_interface = { 0 };
 static volatile bool fc_ready = false;
@@ -87,9 +93,21 @@ typedef struct {
 // Telemetry data
 static crsf_link_statistics_t link_stats = {0};
 
+static uint64_t get_time_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
+}
+
 static inline aggregated_buffer_t* aggr_cur(void)
 {
     return &aggregation_buffer[current_aggregation_buffer];
+}
+
+static inline aggregated_buffer_t* aggr_prev(void)
+{
+    return &aggregation_buffer[current_aggregation_buffer ^ 1];
 }
 
 // Switch to the other buffer; clear the *new current* buffer, keep the previous for duplicate check.
@@ -114,6 +132,17 @@ static void send_aggregated_buffer(void)
     aggregated_buffer_t* cur = aggr_cur();
     if (!cur->buffer || cur->size == 0) return;
 
+#if SEND_OSD_ON_CHANGE_ONLY
+    if (aggr_cur()->buffer && aggr_cur()->size > 0) {
+        if (aggr_cur()->size == aggr_prev()->size &&
+            memcmp(aggr_cur()->buffer, aggr_prev()->buffer, aggr_cur()->size) == 0) {
+            // No change from last sent buffer, skip sending
+            switch_aggregation_buffer();
+            return;
+        }
+    }
+#endif
+
     ssize_t sent = displayport_cb((const char*)cur->buffer, cur->size);
     if (sent < 0) {
         fprintf(stderr, "Error: displayport_cb() returned %zd\n", sent);
@@ -121,6 +150,9 @@ static void send_aggregated_buffer(void)
     }
 
     switch_aggregation_buffer();
+#if SEND_OSD_ON_CHANGE_ONLY
+    last_aggregation_send = get_time_ms();
+#endif
 }
 
 static void send_display_size(uint8_t canvas_size_x, uint8_t canvas_size_y)
@@ -410,6 +442,12 @@ static void* fc_read_thread_fn(void *arg)
                 fc_properties.fc_variant_ready = false;
             }
         }
+#if SEND_OSD_ON_CHANGE_ONLY
+        if (aggr_cur()->size > 0 && (get_time_ms() - last_aggregation_send >= aggregation_timeout)) {
+            send_aggregated_buffer();
+        }
+#endif
+
     }
 
     msp_interface_deinit(&msp_interface);
