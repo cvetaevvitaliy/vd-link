@@ -23,6 +23,7 @@
 #include "remote_client/remote_client.h"
 #include "proxy/proxy.h"
 #include "link.h"
+#include "hal/cpuinfo.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 #define DEFAULT_SERIAL "/dev/ttyS0"
@@ -195,6 +196,11 @@ int main(int argc, char *argv[])
         }
         if (!is_all_fc_properties_ready()) {
             printf("Warning: Could not get all FC properties, using config value for missed properties\n");
+        }
+        char device_name[64] = {0};
+        if (!get_craft_name()) {
+            printf("Warning: Could not get craft name from FC, using config value\n");
+            snprintf(device_name, sizeof(device_name), "VD Link Drone %s", get_cpu_serial_number());
         }
         fill_server_config_from_fc(&config.server_config,
                                         get_fc_variant(),

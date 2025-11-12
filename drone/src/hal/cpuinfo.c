@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdint.h>
+#include <string.h>
+
+#define CPU_SERIAL_PATH "/proc/device-tree/serial-number"
 
 
 cpu_info_t get_cpu_info(void)
@@ -53,4 +56,27 @@ cpu_info_t get_cpu_info(void)
 
     last_time = now;
     return cached;
+}
+
+const char* get_cpu_serial_number(void)
+{
+    static char serial[17] = {0}; // 16 chars + null terminator
+    if (serial[0] != '\0') {
+        return serial; // Return cached value
+    }
+
+    FILE *fp = fopen(CPU_SERIAL_PATH, "r");
+    if (fp) {
+        if (fgets(serial, sizeof(serial), fp)) {
+            // Remove any trailing newline or null characters
+            for (int i = 0; i < sizeof(serial) - 1; i++) {
+                if (serial[i] == '\n' || serial[i] == '\0') {
+                    serial[i] = '\0';
+                    break;
+                }
+            }
+        }
+        fclose(fp);
+    }
+    return serial;
 }
