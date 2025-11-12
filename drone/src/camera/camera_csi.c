@@ -56,7 +56,8 @@ int camera_csi_init(camera_csi_config_t *cfg)
 
     VI_CHN_ATTR_S vi_chn_attr = {0};
     vi_chn_attr.pcVideoNode = "rkispp_scale0";
-    vi_chn_attr.u32BufCnt = 2;
+    // Increase buffer count to reduce risk of transient buffer starvation
+    vi_chn_attr.u32BufCnt = 6;
     vi_chn_attr.u32Width = cfg->width;
     vi_chn_attr.u32Height = cfg->height;
     vi_chn_attr.enPixFmt = IMAGE_TYPE_NV12;
@@ -97,6 +98,84 @@ int camera_csi_bind_encoder(int cam_id, int enc_id)
         return -1;
     }
     return 0;
+}
+
+int camera_csi_bind_detection(camera_csi_config_t *camera_csi_config, common_config_t *common_config)
+{
+    int ret = 0;
+    
+    // Create RGA channel for detection preprocessing
+    RGA_ATTR_S rga_attr = {0};
+    rga_attr.stImgIn.imgType = IMAGE_TYPE_NV12;
+    rga_attr.stImgIn.u32Width = camera_csi_config->width;
+    rga_attr.stImgIn.u32Height = camera_csi_config->height;
+    rga_attr.stImgIn.u32HorStride = camera_csi_config->width;
+    rga_attr.stImgIn.u32VirStride = camera_csi_config->height;
+    rga_attr.stImgIn.u32X = 0;
+    rga_attr.stImgIn.u32Y = 0;
+
+    rga_attr.stImgOut.imgType = IMAGE_TYPE_RGB888; // Detection needs RGB format
+    rga_attr.stImgOut.u32Width = 640;  // Model input width
+    rga_attr.stImgOut.u32Height = 384; // Model input height
+    rga_attr.stImgOut.u32HorStride = 640;
+    rga_attr.stImgOut.u32VirStride = 384;
+    rga_attr.stImgOut.u32X = 0;
+    rga_attr.stImgOut.u32Y = 0;
+
+    ret = RK_MPI_RGA_CreateChn(0, &rga_attr);
+    if (ret) {
+        printf("Create RGA[0] for CSI camera detection failed! ret=%d\n", ret);
+        return -1;
+    }
+
+    // Bind Camera VI[0] and RGA[0]
+    MPP_CHN_S stSrcChn = {0};
+    MPP_CHN_S stDestChn = {0};
+    
+    stSrcChn.enModId = RK_ID_VI;
+    stSrcChn.s32DevId = camera_csi_config->cam_id;
+    stSrcChn.s32ChnId = 0;
+    stDestChn.enModId = RK_ID_RGA;
+    stDestChn.s32DevId = 0;
+    stDestChn.s32ChnId = 0;
+    
+    ret = RK_MPI_SYS_Bind(&stSrcChn, &stDestChn);
+    if (ret) {
+        printf("Bind VI[%d] and RGA[0] for detection failed! ret=%d\n", camera_csi_config->cam_id, ret);
+        RK_MPI_RGA_DestroyChn(0);
+        return -1;
+    }
+    
+    printf("CSI camera detection RGA pipeline created successfully\n");
+    return 0;
+}
+
+int camera_csi_unbind_detection(int cam_id)
+{
+    int ret = 0;
+    MPP_CHN_S stSrcChn = {0};
+    MPP_CHN_S stDestChn = {0};
+
+    // Unbind VI and RGA
+    stSrcChn.enModId = RK_ID_VI;
+    stSrcChn.s32DevId = cam_id;
+    stSrcChn.s32ChnId = 0;
+    stDestChn.enModId = RK_ID_RGA;
+    stDestChn.s32DevId = 0;
+    stDestChn.s32ChnId = 0;
+
+    ret = RK_MPI_SYS_UnBind(&stSrcChn, &stDestChn);
+    if (ret) {
+        printf("UnBind VI[%d] and RGA[0] for detection failed! ret=%d\n", cam_id, ret);
+    }
+
+    // Destroy RGA channel
+    ret = RK_MPI_RGA_DestroyChn(0);
+    if (ret) {
+        printf("Destroy RGA[0] for detection failed! ret=%d\n", ret);
+    }
+
+    return ret;
 }
 
 int camera_csi_unbind_encoder(int cam_id, int enc_id)

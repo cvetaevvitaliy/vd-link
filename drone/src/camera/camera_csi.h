@@ -9,6 +9,8 @@
 
 int camera_csi_init(camera_csi_config_t *cfg);
 int camera_csi_bind_encoder(int cam_id, int enc_id);
+int camera_csi_bind_detection(camera_csi_config_t *camera_csi_config, common_config_t *common_config);
+int camera_csi_unbind_detection(int cam_id);
 int camera_csi_unbind_encoder(int cam_id, int enc_id);
 int camera_csi_deinit(camera_csi_config_t *cfg);
 

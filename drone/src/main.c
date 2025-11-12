@@ -24,6 +24,7 @@
 #include "proxy/proxy.h"
 #include "link.h"
 #include "hal/cpuinfo.h"
+#include "detection/detection_stream.h"
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 #define DEFAULT_SERIAL "/dev/ttyS0"
@@ -338,6 +339,10 @@ int main(int argc, char *argv[])
             return -1;
         }
     }
+    
+    ret = start_detection_stream(config.stream_width, config.stream_height, config.encoder_config.fps);
+    printf("Detection stream started with return code: %d\n", ret);
+
 
     running = true;
     while (running) {
@@ -354,6 +359,8 @@ int main(int argc, char *argv[])
         camera_manager_unbind_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
         camera_manager_deinit_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
     }
+
+    stop_detection_stream();
 
     camera_csi_deinit(&config.camera_csi_config);
     link_stop_telemetry_thread();

@@ -698,6 +698,11 @@ int camera_manager_init_camera(camera_manager_t *manager, common_config_t *confi
 
     if (camera->type == CAMERA_CSI) {
         camera_csi_init(&config->camera_csi_config);
+        // Create RGA pipeline for detection
+        int ret = camera_csi_bind_detection(&config->camera_csi_config, config);
+        if (ret != 0) {
+            printf("Failed to bind CSI camera to detection RGA pipeline: ret=%d\n", ret);
+        }
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
         if (config->camera_usb_config.height == 0 || config->camera_usb_config.width == 0) {
             config->camera_usb_config.height = camera->supported_resolutions[0].height;
@@ -721,6 +726,7 @@ void camera_manager_deinit_camera(camera_manager_t *manager, common_config_t *co
 
     if (camera->type == CAMERA_CSI) {
         camera_csi_unbind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
+        camera_csi_unbind_detection(config->camera_csi_config.cam_id);
         camera_csi_deinit(&config->camera_csi_config);
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
         camera_usb_unbind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);

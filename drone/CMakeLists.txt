@@ -111,9 +111,11 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/msp/src
         ${CMAKE_SOURCE_DIR}/lib/ini/src
         ${CMAKE_SOURCE_DIR}/lib/client
+        ${CMAKE_SOURCE_DIR}/lib/bytetrack
 )
 
 add_subdirectory(src/fc_conn)
+add_subdirectory(src/detection)
 
 add_executable(${PROJECT_NAME}
         src/camera/isp/sample_common_isp.c
@@ -146,6 +148,7 @@ target_link_libraries(${PROJECT_NAME}
         link
         fc_conn
         drone_client
+        detection
         ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
