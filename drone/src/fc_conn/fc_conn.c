@@ -21,7 +21,9 @@
 #define OSD_DEFAULT_CHAR_X    53
 #define OSD_DEFAULT_CHAR_Y    20
 #define SEND_OSD_ON_CHANGE_ONLY 0
-#define MSP_AGGREGATION_TIMEOUT_MSEC 1500
+#define MSP_AGGREGATION_TIMEOUT_MSEC     1500
+#define THREAD_MSP_WRITE_SLEEP_MSEC      500
+#define MSP_AGGREGATION_IDLE_FLUSH_MSEC  250  /* flush aggregated buffer if no new data for N ms */
 
 #ifndef MSP_AGGR_MTU
 #define MSP_AGGR_MTU          ((3 + 1 + 1 + 255 + 1)*2)  /* "$M<|> len cmd payload cksum" * 2 full frames */
@@ -61,6 +63,7 @@ static volatile bool run = false;
 static fc_properties_t fc_properties = {0};
 
 static pthread_t fc_read_thread;
+static pthread_t fc_write_thread;
 static pthread_mutex_t aggr_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0, 0}, {NULL, 0, 0}};
@@ -69,6 +72,7 @@ static uint8_t current_aggregation_buffer = 0;
 static uint16_t aggregation_timeout = MSP_AGGREGATION_TIMEOUT_MSEC;
 static uint64_t last_aggregation_send = 0;
 #endif
+static uint64_t last_aggregation_update = 0;  /* time of last frame append into aggregation buffer */
 static uint16_t aggregation_mtu = MSP_AGGR_MTU;
 static msp_interface_t msp_interface = { 0 };
 static volatile bool fc_ready = false;
@@ -143,7 +147,7 @@ static void send_aggregated_buffer(void)
     }
 #endif
 
-    ssize_t sent = displayport_cb((const char*)cur->buffer, cur->size);
+    ssize_t sent = displayport_cb ? displayport_cb((const char*)cur->buffer, cur->size) : cur->size;
     if (sent < 0) {
         fprintf(stderr, "Error: displayport_cb() returned %zd\n", sent);
         // Keep buffer to retry on next tick if you want; here we still switch to avoid blocking.
@@ -242,7 +246,9 @@ void msp_send_update_rssi(int rssi)
 // No sending here — flush thread handles cadence.
 static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t msp_cmd, uint16_t data_size, const uint8_t *payload)
 {
-    //printf("[MSP] RX callback: cmd=%u size=%u\n", msp_cmd, data_size);
+    (void)owner;
+    (void)msp_version;
+
     // Safety check: validate payload pointer if data_size > 0
     if (data_size > 0 && payload == NULL) {
         printf("[MSP] ERROR: null payload with non-zero data_size=%u\n", data_size);
@@ -309,6 +315,9 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
                 uint8_t aio_flags = payload[6];
                 uint8_t capabilities = payload[7];
                 uint8_t fw_string_len = payload[8];
+                (void)hw_version;
+                (void)aio_flags;
+                (void)capabilities;
                 if (fw_string_len > 0 && fw_string_len <= data_size - 9) {
                     memcpy(fc_properties.board_info, &payload[9], fw_string_len < sizeof(fc_properties.board_info) - 1 ? fw_string_len : sizeof(fc_properties.board_info) - 1);
                     fc_properties.board_info[fw_string_len] = '\0';
@@ -382,6 +391,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 
     memcpy(cur->buffer + cur->size, frame, len);
     cur->size += len;
+    last_aggregation_update = get_time_ms();  /* track time of last new data appended */
 
     pthread_mutex_unlock(&aggr_mutex);
 
@@ -395,7 +405,26 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
             printf("[MSP] FC Variant received: %s\n", variant_str);
             break;
         }
+    default:
+        break;
     }
+}
+
+static void* fc_write_thread_fn(void *arg)
+{
+    (void)arg;
+
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = THREAD_MSP_WRITE_SLEEP_MSEC * 1000000L;
+
+    while (run) {
+        /* Periodically request FC variant */
+        send_variant_request();
+        nanosleep(&ts, NULL);
+    }
+
+    return NULL;
 }
 
 static void* fc_read_thread_fn(void *arg)
@@ -424,8 +453,6 @@ static void* fc_read_thread_fn(void *arg)
         memset(aggregation_buffer[1].buffer, 0, aggregation_mtu);
     }
 
-
-    int step = 0;
     while (run) {
         if (!is_all_fc_properties_ready()) {
             request_fc_info();
@@ -450,12 +477,24 @@ static void* fc_read_thread_fn(void *arg)
                 fc_properties.fc_variant_ready = false;
             }
         }
-#if SEND_OSD_ON_CHANGE_ONLY
-        if (aggr_cur()->size > 0 && (get_time_ms() - last_aggregation_send >= aggregation_timeout)) {
+
+        /* Flush aggregated buffer if no new data for some time */
+        uint64_t now = get_time_ms();
+        pthread_mutex_lock(&aggr_mutex);
+        if (aggr_cur()->size > 0 &&
+            last_aggregation_update != 0 &&
+            (now - last_aggregation_update) >= MSP_AGGREGATION_IDLE_FLUSH_MSEC) {
             send_aggregated_buffer();
         }
-#endif
+        pthread_mutex_unlock(&aggr_mutex);
 
+#if SEND_OSD_ON_CHANGE_ONLY
+        if (aggr_cur()->size > 0 && (get_time_ms() - last_aggregation_send >= aggregation_timeout)) {
+            pthread_mutex_lock(&aggr_mutex);
+            send_aggregated_buffer();
+            pthread_mutex_unlock(&aggr_mutex);
+        }
+#endif
     }
 
     msp_interface_deinit(&msp_interface);
@@ -495,10 +534,16 @@ int connect_to_fc(const char *device, int baudrate)
     // Reset state
     current_aggregation_buffer = 0;
     fc_ready = false;
+    last_aggregation_update = 0;
 
     // Start threads
     if (pthread_create(&fc_read_thread, NULL, fc_read_thread_fn, NULL) != 0) {
         fprintf(stderr, "Failed to create FC read thread\n");
+        return -1;
+    }
+
+    if (pthread_create(&fc_write_thread, NULL, fc_write_thread_fn, NULL) != 0) {
+        fprintf(stderr, "Failed to create FC write thread\n");
         return -1;
     }
 
@@ -510,6 +555,7 @@ void disconnect_from_fc(void)
     run = false;
 
     // Join threads
+    pthread_join(fc_write_thread, NULL);
     pthread_join(fc_read_thread, NULL);
 
     // Free buffers & snapshots
@@ -617,4 +663,3 @@ void send_telemetry_to_fc(void)
     sendto(udp_socket, &link_stats, sizeof(link_stats), 0,
            (struct sockaddr*)&fc_addr, sizeof(fc_addr));
 }
-
