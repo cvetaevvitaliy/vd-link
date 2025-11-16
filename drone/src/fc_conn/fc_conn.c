@@ -22,8 +22,7 @@
 #define OSD_DEFAULT_CHAR_Y    20
 #define SEND_OSD_ON_CHANGE_ONLY 0
 #define MSP_AGGREGATION_TIMEOUT_MSEC     1500
-#define THREAD_MSP_WRITE_SLEEP_MSEC      500
-#define MSP_AGGREGATION_IDLE_FLUSH_MSEC  250  /* flush aggregated buffer if no new data for N ms */
+#define THREAD_MSP_WRITE_SLEEP_MSEC      2000 /* 2 seconds */
 
 #ifndef MSP_AGGR_MTU
 #define MSP_AGGR_MTU          ((3 + 1 + 1 + 255 + 1)*2)  /* "$M<|> len cmd payload cksum" * 2 full frames */
@@ -248,6 +247,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
 {
     (void)owner;
     (void)msp_version;
+    bool need_send = false;
 
     // Safety check: validate payload pointer if data_size > 0
     if (data_size > 0 && payload == NULL) {
@@ -352,7 +352,8 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         case MSP_DISPLAYPORT_DRAW_STRING: // 3 -> Draw String
             break;
         case MSP_DISPLAYPORT_DRAW_SCREEN: // 4 -> Draw Screen
-         if (fc_properties.fc_variant_ready && fc_properties.fc_variant[0] == 'I') // INAV variant
+            need_send = true;
+            if (fc_properties.fc_variant_ready && fc_properties.fc_variant[0] == 'I') // INAV variant
             {
                 /* Send DisplayPort heartbeat only after we receive all FC properties
                    In other case FC could not answer to our requests intime */
@@ -377,7 +378,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     aggregated_buffer_t* cur = aggr_cur();
 
     // If frame does not fit — flush immediately once, then retry append.
-    if ((uint32_t)cur->size + len > cur->cap) {
+    if ((uint32_t)cur->size + len > cur->cap || need_send) {
         // Immediate flush (one-shot), to keep frame boundaries and MTU limits.
         send_aggregated_buffer();
         // Retry append; if still too large (oversize frame) — drop it (shouldn't happen)
@@ -477,16 +478,6 @@ static void* fc_read_thread_fn(void *arg)
                 fc_properties.fc_variant_ready = false;
             }
         }
-
-        /* Flush aggregated buffer if no new data for some time */
-        uint64_t now = get_time_ms();
-        pthread_mutex_lock(&aggr_mutex);
-        if (aggr_cur()->size > 0 &&
-            last_aggregation_update != 0 &&
-            (now - last_aggregation_update) >= MSP_AGGREGATION_IDLE_FLUSH_MSEC) {
-            send_aggregated_buffer();
-        }
-        pthread_mutex_unlock(&aggr_mutex);
 
 #if SEND_OSD_ON_CHANGE_ONLY
         if (aggr_cur()->size > 0 && (get_time_ms() - last_aggregation_send >= aggregation_timeout)) {
