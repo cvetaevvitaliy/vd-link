@@ -164,6 +164,7 @@ int main(int argc, char *argv[])
     printf(" Flip: %s\n", config.camera_csi_config.flip ? "ON" : "OFF");
     printf(" Mirror: %s\n", config.camera_csi_config.mirror ? "ON" : "OFF");
     printf("\n");
+    config.encoder_config.pixel_format = PIXFMT_NV12; // set default encoder input pixel format
 
     config.encoder_config.callback = rtp_streamer_push_frame;
 

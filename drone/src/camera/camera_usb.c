@@ -9,6 +9,20 @@
 #include "common.h"
 #include "camera_manager.h"
 
+static inline IMAGE_TYPE_E pixfmt_to_image_type(pixfmt_t pixfmt)
+{
+    switch (pixfmt) {
+        case PIXFMT_NV12:
+            return IMAGE_TYPE_NV12;
+        case PIXFMT_YUYV422:
+            return IMAGE_TYPE_YUYV422;
+        case PIXFMT_RGB888:
+            return IMAGE_TYPE_RGB888;
+        default:
+            return IMAGE_TYPE_UNKNOW;
+    }
+}
+
 // int camera_usb_init(camera_info_t* camera_info, common_config_t* common_config)
 int camera_usb_init(common_config_t* common_config)
 {
@@ -21,15 +35,16 @@ int camera_usb_init(common_config_t* common_config)
     char device_path[20];
     camera_usb_config_t* camera_usb_config = &common_config->camera_usb_config;
     snprintf(device_path, sizeof(device_path), "/dev/video%d", camera_usb_config->device_index);
-    printf("Initializing USB camera at %s with resolution %dx%d\n",
-           device_path, camera_usb_config->width, camera_usb_config->height);
+    printf("Initializing USB camera at %s with resolution %dx%d (%s)\n",
+           device_path, camera_usb_config->width, camera_usb_config->height,
+           pixel_format_to_string(camera_usb_config->pixel_format));
 
     VI_CHN_ATTR_S vi_chn_attr = {0};
     vi_chn_attr.pcVideoNode = device_path;
     vi_chn_attr.u32BufCnt = 3;
     vi_chn_attr.u32Width = camera_usb_config->width;
     vi_chn_attr.u32Height = camera_usb_config->height;
-    vi_chn_attr.enPixFmt = IMAGE_TYPE_YUYV422;
+    vi_chn_attr.enPixFmt = pixfmt_to_image_type(camera_usb_config->pixel_format);
     vi_chn_attr.enWorkMode = VI_WORK_MODE_NORMAL;
     vi_chn_attr.enBufType = VI_CHN_BUF_TYPE_MMAP;
     
@@ -45,43 +60,43 @@ int camera_usb_init(common_config_t* common_config)
         return -1;
     }
 
-    RGA_ATTR_S rga_attr = {0};
-    rga_attr.stImgIn.imgType = IMAGE_TYPE_YUYV422;
-    rga_attr.stImgIn.u32Width = camera_usb_config->width;
-    rga_attr.stImgIn.u32Height = camera_usb_config->height;
-    rga_attr.stImgIn.u32HorStride = camera_usb_config->width * 2; // YUYV has 2 bytes per pixel
-    rga_attr.stImgIn.u32VirStride = camera_usb_config->height;
-    rga_attr.stImgIn.u32X = 0;
-    rga_attr.stImgIn.u32Y = 0;
+    // RGA_ATTR_S rga_attr = {0};
+    // rga_attr.stImgIn.imgType = pixfmt_to_image_type(camera_usb_config->pixel_format);
+    // rga_attr.stImgIn.u32Width = camera_usb_config->width;
+    // rga_attr.stImgIn.u32Height = camera_usb_config->height;
+    // rga_attr.stImgIn.u32HorStride = camera_usb_config->width * 2; // YUYV has 2 bytes per pixel
+    // rga_attr.stImgIn.u32VirStride = camera_usb_config->height;
+    // rga_attr.stImgIn.u32X = 0;
+    // rga_attr.stImgIn.u32Y = 0;
     
-    rga_attr.stImgOut.imgType = IMAGE_TYPE_NV12; // Force NV12 output
-    rga_attr.stImgOut.u32Width = common_config->stream_width;
-    rga_attr.stImgOut.u32Height = common_config->stream_height;
-    rga_attr.stImgOut.u32HorStride = common_config->stream_width;
-    rga_attr.stImgOut.u32VirStride = common_config->stream_height;
-    rga_attr.stImgOut.u32X = 0;
-    rga_attr.stImgOut.u32Y = 0;
+    // rga_attr.stImgOut.imgType = IMAGE_TYPE_NV12; // Force NV12 output
+    // rga_attr.stImgOut.u32Width = common_config->stream_width;
+    // rga_attr.stImgOut.u32Height = common_config->stream_height;
+    // rga_attr.stImgOut.u32HorStride = common_config->stream_width;
+    // rga_attr.stImgOut.u32VirStride = common_config->stream_height;
+    // rga_attr.stImgOut.u32X = 0;
+    // rga_attr.stImgOut.u32Y = 0;
 
-    ret = RK_MPI_RGA_CreateChn(0, &rga_attr);
-    if (ret) {
-        printf("Create RGA[0] for USB camera failed! ret=%d\n", ret);
-        return -1;
-    }
+    // ret = RK_MPI_RGA_CreateChn(0, &rga_attr);
+    // if (ret) {
+    //     printf("Create RGA[0] for USB camera failed! ret=%d\n", ret);
+    //     return -1;
+    // }
 
-    // Bind Camera VI[1] and RGA[0]
-    MPP_CHN_S stSrcChn = {0};
-    MPP_CHN_S stDestChn = {0};
-    stSrcChn.enModId = RK_ID_VI;
-    stSrcChn.s32DevId = 0;
-    stSrcChn.s32ChnId = 1;
-    stDestChn.enModId = RK_ID_RGA;
-    stDestChn.s32DevId = 0;
-    stDestChn.s32ChnId = 0;
-    ret = RK_MPI_SYS_Bind(&stSrcChn, &stDestChn);
-    if (ret) {
-        printf("Bind VI[1] and RGA[0] for USB camera failed! ret=%d\n", ret);
-        return -1;
-    }
+    // // Bind Camera VI[1] and RGA[0]
+    // MPP_CHN_S stSrcChn = {0};
+    // MPP_CHN_S stDestChn = {0};
+    // stSrcChn.enModId = RK_ID_VI;
+    // stSrcChn.s32DevId = 0;
+    // stSrcChn.s32ChnId = 1;
+    // stDestChn.enModId = RK_ID_RGA;
+    // stDestChn.s32DevId = 0;
+    // stDestChn.s32ChnId = 0;
+    // ret = RK_MPI_SYS_Bind(&stSrcChn, &stDestChn);
+    // if (ret) {
+    //     printf("Bind VI[1] and RGA[0] for USB camera failed! ret=%d\n", ret);
+    //     return -1;
+    // }
 
     return 0;
 }
@@ -100,9 +115,9 @@ int camera_usb_bind_encoder(int cam_id, int enc_id)
     MPP_CHN_S stDestChn = {0};
 
     // Bind Camera VI[1] and Encoder VENC[0]
-    stSrcChn.enModId = RK_ID_RGA;
+    stSrcChn.enModId = RK_ID_VI;
     stSrcChn.s32DevId = 0;
-    stSrcChn.s32ChnId = 0;
+    stSrcChn.s32ChnId = 1;
     stDestChn.enModId = RK_ID_VENC;
     stDestChn.s32DevId = enc_id;
     stDestChn.s32ChnId = 0;
@@ -120,9 +135,9 @@ int camera_usb_unbind_encoder(int cam_id, int enc_id)
     MPP_CHN_S stDestChn = {0};
 
     // UNBind Camera VI[1] and Encoder VENC[0]
-    stSrcChn.enModId = RK_ID_RGA;
+    stSrcChn.enModId = RK_ID_VI;
     stSrcChn.s32DevId = 0;
-    stSrcChn.s32ChnId = 0;
+    stSrcChn.s32ChnId = 1;
     stDestChn.enModId = RK_ID_VENC;
     stDestChn.s32DevId = enc_id;
     stDestChn.s32ChnId = 0;

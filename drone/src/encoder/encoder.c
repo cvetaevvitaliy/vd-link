@@ -242,7 +242,7 @@ static int encoder_fill_venc_params(encoder_config_t *cfg, VENC_CHN_ATTR_S *venc
     }
 
     venc_chn_attr->stVencAttr.enType = codec_type;
-    venc_chn_attr->stVencAttr.imageType = IMAGE_TYPE_NV12;
+    venc_chn_attr->stVencAttr.imageType = cfg->pixel_format;
     venc_chn_attr->stVencAttr.u32PicWidth = cfg->width;
     venc_chn_attr->stVencAttr.u32PicHeight = cfg->height;
     venc_chn_attr->stVencAttr.u32VirWidth = cfg->width;
@@ -351,6 +351,19 @@ int encoder_init(encoder_config_t *cfg)
         return -1;
     }
 
+    return 0;
+}
+
+int encoder_set_input_image_format(pixfmt_t  pixel_format, int width, int height)
+{
+    encoder_clean();
+    config.encoder_config.pixel_format = pixel_format;
+    config.encoder_config.width = width;
+    config.encoder_config.height = height;
+    
+    printf("Setting encoder input image format to %d, width=%d, height=%d\n", pixel_format, width, height);
+
+    encoder_init(&config.encoder_config);
     return 0;
 }
 

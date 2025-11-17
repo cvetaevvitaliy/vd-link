@@ -15,6 +15,6 @@ int encoder_set_fps(int fps);
 int encoder_set_gop(int gop);
 int encoder_set_rate_control(rate_control_mode_t mode);
 int encoder_set_codec(codec_type_t codec);
-
+int encoder_set_input_image_format(pixfmt_t  pixel_format, int width, int height);
 
 #endif //ENCODER_H

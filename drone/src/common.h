@@ -24,6 +24,14 @@ typedef enum {
     RATE_CONTROL_FIXQP
 } rate_control_mode_t;
 
+// Synced with enum rk_IMAGE_TYPE_E
+typedef enum {
+    PIXFMT_UNKNOWN = 0,
+    PIXFMT_NV12 = 4,
+    PIXFMT_YUYV422 = 13,
+    PIXFMT_RGB888 = 19
+} pixfmt_t;
+
 typedef struct {
     const char *name;
     int width;
@@ -53,6 +61,7 @@ typedef struct {
     int fps;
     int gop;
     encoder_callback callback;
+    pixfmt_t pixel_format;
 } encoder_config_t;
 
 typedef struct {
@@ -81,6 +90,7 @@ typedef struct {
     // Backlight parameters
     bool backlight_enable;
     uint32_t backlight_strength;
+    pixfmt_t pixel_format;
 } camera_csi_config_t;
 
 typedef struct {
@@ -88,6 +98,7 @@ typedef struct {
     int width;
     int height;
     int fps;
+    pixfmt_t pixel_format;
 } camera_usb_config_t;
 
 typedef struct {

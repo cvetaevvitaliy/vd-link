@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include "camera/camera_csi.h"
 #include "camera/camera_usb.h"
+#include "encoder/encoder.h"
 
 // Forward declarations
 static camera_sensor_t get_sensor_from_names(const char *driver, const char *card, 
@@ -52,6 +53,20 @@ static bool is_isp_pipeline_device(const char *name) {
         }
     }
     return false;
+}
+
+static inline pixfmt_t v4l2_pixfmt_to_pixfmt(uint32_t v4l2_pixfmt)
+{
+    switch (v4l2_pixfmt) {
+        case V4L2_PIX_FMT_NV12:
+            return PIXFMT_NV12;
+        case V4L2_PIX_FMT_YUYV:
+            return PIXFMT_YUYV422;
+        case V4L2_PIX_FMT_RGB24:
+            return PIXFMT_RGB888;
+        default:
+            return PIXFMT_UNKNOWN;
+    }
 }
 
 // Scan subdev devices for camera sensors
@@ -212,6 +227,7 @@ bool camera_test_v4l2_device(const char *device_path, camera_info_t *info) {
                     info->supported_resolutions[info->num_resolutions].width = frmsize.discrete.width;
                     info->supported_resolutions[info->num_resolutions].height = frmsize.discrete.height;
                     info->supported_resolutions[info->num_resolutions].fps = 30; // Default
+                    info->supported_resolutions[info->num_resolutions].pixel_format = v4l2_pixfmt_to_pixfmt(frmsize.pixel_format);
                     info->num_resolutions++;
                 }
             } else {
@@ -225,6 +241,16 @@ bool camera_test_v4l2_device(const char *device_path, camera_info_t *info) {
 
     close(fd);
     return true;
+}
+
+const char* pixel_format_to_string(uint32_t pixel_format)
+{
+    switch (pixel_format) {
+        case PIXFMT_NV12: return "NV12";
+        case PIXFMT_RGB888: return "RGB888";
+        case PIXFMT_YUYV422: return "YUYV422";
+        default: return "Unknown";
+    }
 }
 
 // Detect CSI cameras
@@ -285,10 +311,10 @@ int camera_detect_csi(camera_info_t *cameras, int max_cameras) {
                     cam->sensor = SENSOR_UNKNOWN;
                 }
                 
-                // Add some resolution info for IMX307
+                // Add some resolution info for IMX307. Real resolution will be read from config
                 if (cam->sensor == SENSOR_IMX307) {
-                    cam->supported_resolutions[0] = (camera_resolution_t){1920, 1080, 30};
-                    cam->supported_resolutions[1] = (camera_resolution_t){1945, 1097, 60};
+                    cam->supported_resolutions[0] = (camera_resolution_t){1920, 1080, 30, PIXFMT_NV12};
+                    cam->supported_resolutions[1] = (camera_resolution_t){1280, 720, 60, PIXFMT_NV12};
                     cam->num_resolutions = 2;
                 }
                 
@@ -626,8 +652,9 @@ void camera_manager_print_all(camera_manager_t *manager) {
         if (cam->num_resolutions > 0) {
             printf("    Resolutions: ");
             for (int j = 0; j < cam->num_resolutions && j < 3; j++) {
-                printf("%ux%u", cam->supported_resolutions[j].width,
-                               cam->supported_resolutions[j].height);
+                printf("%ux%u (%s)", cam->supported_resolutions[j].width,
+                               cam->supported_resolutions[j].height,
+                               pixel_format_to_string(cam->supported_resolutions[j].pixel_format));
                 if (j < cam->num_resolutions - 1 && j < 2) printf(", ");
             }
             if (cam->num_resolutions > 3) printf("...");
@@ -697,11 +724,13 @@ int camera_manager_init_camera(camera_manager_t *manager, common_config_t *confi
     }
 
     if (camera->type == CAMERA_CSI) {
+        config->camera_csi_config.pixel_format = PIXFMT_NV12; // Hardcoded for now
         camera_csi_init(&config->camera_csi_config);
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
         if (config->camera_usb_config.height == 0 || config->camera_usb_config.width == 0) {
             config->camera_usb_config.height = camera->supported_resolutions[0].height;
             config->camera_usb_config.width = camera->supported_resolutions[0].width;
+            config->camera_usb_config.pixel_format = camera->supported_resolutions[0].pixel_format;
         }
         if (config->camera_usb_config.device_index <= 0) {
             config->camera_usb_config.device_index = camera->device_id;
@@ -735,8 +764,12 @@ int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *confi
     }
 
     if (camera->type == CAMERA_CSI) {
+        encoder_set_input_image_format(config->camera_csi_config.pixel_format,
+                                       config->camera_csi_config.width, config->camera_csi_config.height);
         camera_csi_bind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
+        encoder_set_input_image_format(config->camera_usb_config.pixel_format,
+                                       config->camera_usb_config.width, config->camera_usb_config.height);
         camera_usb_bind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);
     }
 

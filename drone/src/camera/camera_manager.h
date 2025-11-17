@@ -37,6 +37,7 @@ typedef struct {
     uint32_t width;
     uint32_t height;
     uint32_t fps;
+    uint32_t pixel_format;
 } camera_resolution_t;
 
 typedef struct {
@@ -104,6 +105,7 @@ static inline const char* camera_type_to_string(camera_type_t type) {
         default: return "Not Found";
     }
 }
+const char* pixel_format_to_string(uint32_t pixel_format);
 
 static inline const char* sensor_type_to_string(camera_sensor_t sensor) {
     switch(sensor) {
