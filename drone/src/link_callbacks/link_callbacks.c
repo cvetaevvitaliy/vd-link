@@ -50,12 +50,12 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CAMERA, NULL, 0);
                     break;
                 }
-                uint32_t num_cameras = camera_manager.count;
-                uint32_t response[2] = {current_camera_index, num_cameras};
+                uint32_t response[2] = {current_camera_index, camera_manager.count};
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CAMERA, response, sizeof(response));
             }
             else if (cmd_id == LINK_CMD_SET) {
                 if (size != sizeof(uint32_t)) {
+                    printf("Invalid data size for CAMERA SET command\n");
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CAMERA, NULL, 0);
                     break;
                 }
@@ -63,7 +63,8 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 printf("Switching to camera ID: %d\n", camera_id);
                 bool switch_success = camera_select_camera_by_idx(&camera_manager, &config, camera_id);
                 if (switch_success) {
-                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CAMERA, &camera_id, sizeof(camera_id));
+                    uint32_t response[2] = {camera_id, camera_manager.count};
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CAMERA, response, sizeof(response));
                 } else {
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CAMERA, NULL, 0);
                 }
