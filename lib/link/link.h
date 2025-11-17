@@ -169,16 +169,16 @@ typedef struct {
     link_phy_type_t phy_type;
     union {
         struct {
-            long rssi;
-            long rsrq;
-            long rsrp;
+            int32_t rssi;
+            int32_t rsrq;
+            int32_t rsrp;
             double snr;
         } lte_signal;
         struct {
-            long rssi;
+            int32_t rssi;
         } wcdma_signal;
         struct {
-            long rssi;
+            int32_t rssi;
         } wifi_signal;
     };
 } link_sys_telemetry_t;
