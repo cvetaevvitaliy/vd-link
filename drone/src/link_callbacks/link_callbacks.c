@@ -11,7 +11,7 @@
 #include "hal/transport.h"
 #include "fc_conn/fc_conn.h"
 #include "config/config_parser.h"
-#include "camera/isp/sample_common.h"
+#include "camera/camera_csi.h"
 
 static volatile bool running;
 static pthread_t telemetry_thread;
@@ -94,6 +94,9 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FOCUS_MODE, &focus_mode_quality, sizeof(focus_mode_quality));
             }
             else if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(int32_t)) {
+                    break;
+                }
                 int32_t focus_mode_quality = *(int32_t*)data;
                 config.encoder_config.encoder_focus_mode.focus_quality = focus_mode_quality;
                 encoder_focus_mode(&config.encoder_config);
@@ -106,8 +109,10 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_FPS, &fps, sizeof(fps));
             }
             else if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
                 uint32_t fps = *(uint32_t*)data;
-                uint32_t old_fps = config.encoder_config.fps;
                 if (encoder_set_fps(fps) == 0) {
                     printf("Set FPS to %u successfully\n", fps);
                     config.encoder_config.fps = fps;
@@ -115,6 +120,7 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 }
                 else {
                     printf("Failed to set FPS to %u\n", fps);
+                    uint32_t old_fps = config.encoder_config.fps;
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_FPS, &old_fps, sizeof(old_fps));
                 }
             }
@@ -125,6 +131,9 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_BITRATE, &bitrate, sizeof(bitrate));
             }
             else if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
                 uint32_t bitrate = *(uint32_t*)data;
                 uint32_t old_bitrate = config.encoder_config.bitrate * 1024;
                 int ret = encoder_set_bitrate(bitrate * 1024 /* convert kbps to bps */);
@@ -142,14 +151,17 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_GOP:
             if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
                 uint32_t gop_size = *(uint32_t*)data;
-                uint32_t old_gop = config.encoder_config.gop;
                 if (encoder_set_gop(gop_size) == 0) {
                     printf("Set GOP to %u successfully\n", gop_size);
                     config.encoder_config.gop = gop_size;
                     link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_GOP, &gop_size, sizeof(gop_size));
                 } else {
                     printf("Failed to set GOP to %u\n", gop_size);
+                    uint32_t old_gop = config.encoder_config.gop;
                     link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_GOP, &old_gop, sizeof(old_gop));
                 }
             }
@@ -171,14 +183,20 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_VBR:
             if (cmd_id == LINK_CMD_SET) {
-                rate_control_mode_t mode = (data) ? *(rate_control_mode_t*)data : RATE_CONTROL_CBR;
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
+                uint32_t vbr_enabled = *(uint32_t*)data;
+                rate_control_mode_t mode = vbr_enabled ? RATE_CONTROL_VBR : RATE_CONTROL_CBR;
                 if (encoder_set_rate_control(mode) == 0) {
                     printf("Switched to %s successfully\n", mode == RATE_CONTROL_VBR ? "VBR" : "CBR");
-                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_VBR, &mode, sizeof(mode));
+                    config.encoder_config.rate_mode = mode;
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_VBR, &vbr_enabled, sizeof(vbr_enabled));
                     break;
                 } else {
                     printf("Failed to switch to %s\n", mode == RATE_CONTROL_VBR ? "VBR" : "CBR");
-                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_VBR, &config.encoder_config.rate_mode, sizeof(config.encoder_config.rate_mode));
+                    uint32_t current_vbr_enabled = (config.encoder_config.rate_mode == RATE_CONTROL_VBR) ? 1 : 0;
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_VBR, &current_vbr_enabled, sizeof(current_vbr_enabled));
                 }
             }
             if (cmd_id == LINK_CMD_GET) {
@@ -188,13 +206,19 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_CODEC:
             if (cmd_id == LINK_CMD_SET) {
-                codec_type_t codec = *(codec_type_t*)data;
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
+                uint32_t is_hevc = *(uint32_t*)data;
+                codec_type_t codec = is_hevc ? CODEC_H265 : CODEC_H264;
                 if (encoder_set_codec(codec) == 0) {
                     printf("Switched codec to %d successfully\n", codec);
-                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CODEC, &codec, sizeof(codec));
+                    config.encoder_config.codec = codec;
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_CODEC, &is_hevc, sizeof(is_hevc));
                 } else {
                     printf("Failed to switch codec to %d\n", codec);
-                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CODEC, &config.encoder_config.codec, sizeof(config.encoder_config.codec));
+                    uint32_t current_is_hevc = (config.encoder_config.codec == CODEC_H265) ? 1 : 0;
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_CODEC, &current_is_hevc, sizeof(current_is_hevc));
                 }
             }
             else if (cmd_id == LINK_CMD_GET) {
@@ -211,65 +235,101 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_BRIGHTNESS:
             {
-                int32_t value = *(int32_t*)data;
                 if (cmd_id == LINK_CMD_SET) {
-                    SAMPLE_COMM_ISP_SET_Brightness(config.camera_csi_config.cam_id, value);
-                    config.camera_csi_config.brightness = value;
-                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    if (size != sizeof(uint32_t)) {
+                        break;
+                    }
+                    uint32_t value = *(uint32_t*)data;
+                    if (set_camera_csi_brightness(config.camera_csi_config.cam_id, value) == 0) {
+                        config.camera_csi_config.brightness = value;
+                        link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    } else {
+                        uint32_t current_value = config.camera_csi_config.brightness;
+                        link_send_cmd(LINK_CMD_NACK, sub_cmd_id, &current_value, sizeof(current_value));
+                    }
                 } else if (cmd_id == LINK_CMD_GET) {
-                    int32_t current_value = config.camera_csi_config.brightness;
+                    uint32_t current_value = config.camera_csi_config.brightness;
                     link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
                 }
             }
             break;
         case LINK_SUBCMD_CONTRAST:
             {
-                int32_t value = *(int32_t*)data;
                 if (cmd_id == LINK_CMD_SET) {
-                    SAMPLE_COMM_ISP_SET_Contrast(config.camera_csi_config.cam_id, (uint32_t)value);
-                    config.camera_csi_config.contrast = value;
-                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    if (size != sizeof(uint32_t)) {
+                        break;
+                    }
+                    uint32_t value = *(uint32_t*)data;
+                    if (set_camera_csi_contrast(config.camera_csi_config.cam_id, value) == 0) {
+                        config.camera_csi_config.contrast = value;
+                        link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    } else {
+                        uint32_t current_value = config.camera_csi_config.contrast;
+                        link_send_cmd(LINK_CMD_NACK, sub_cmd_id, &current_value, sizeof(current_value));
+                    }
                 } else if (cmd_id == LINK_CMD_GET) {
-                    int32_t current_value = config.camera_csi_config.contrast;
+                    uint32_t current_value = config.camera_csi_config.contrast;
                     link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
                 }
             }
             break;
         case LINK_SUBCMD_SATURATION:
             {
-                int32_t value = *(int32_t*)data;
                 if (cmd_id == LINK_CMD_SET) {
-                    SAMPLE_COMM_ISP_SET_Saturation(config.camera_csi_config.cam_id, (uint32_t)value);
-                    config.camera_csi_config.saturation = value;
-                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    if (size != sizeof(uint32_t)) {
+                        break;
+                    }
+                    uint32_t value = *(uint32_t*)data;
+                    if (set_camera_csi_saturation(config.camera_csi_config.cam_id, value) == 0) {
+                        config.camera_csi_config.saturation = value;
+                        link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    } else {
+                        uint32_t current_value = config.camera_csi_config.saturation;
+                        link_send_cmd(LINK_CMD_NACK, sub_cmd_id, &current_value, sizeof(current_value));
+                    }
                 } else if (cmd_id == LINK_CMD_GET) {
-                    int32_t current_value = config.camera_csi_config.saturation;
+                    uint32_t current_value = config.camera_csi_config.saturation;
                     link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
                 }
             }
             break;
         case LINK_SUBCMD_SHARPNESS:
             {
-                int32_t value = *(int32_t*)data;
                 if (cmd_id == LINK_CMD_SET) {
-                    SAMPLE_COMM_ISP_SET_Sharpness(config.camera_csi_config.cam_id, (uint32_t)value);
-                    config.camera_csi_config.sharpness = value;
-                    link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    if (size != sizeof(uint32_t)) {
+                        break;
+                    }
+                    uint32_t value = *(uint32_t*)data;
+                    if (set_camera_csi_sharpness(config.camera_csi_config.cam_id, value) == 0) {
+                        config.camera_csi_config.sharpness = value;
+                        link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &value, sizeof(value));
+                    } else {
+                        uint32_t current_value = config.camera_csi_config.sharpness;
+                        link_send_cmd(LINK_CMD_NACK, sub_cmd_id, &current_value, sizeof(current_value));
+                    }
                 } else if (cmd_id == LINK_CMD_GET) {
-                    int32_t current_value = config.camera_csi_config.sharpness;
+                    uint32_t current_value = config.camera_csi_config.sharpness;
                     link_send_cmd(LINK_CMD_ACK, sub_cmd_id, &current_value, sizeof(current_value));
                 }
             }
             break;
         case LINK_SUBCMD_HDR:
             if (cmd_id == LINK_CMD_GET) {
-                bool hdr_enabled = *(bool*)data;
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
+                uint32_t hdr_enabled = config.camera_csi_config.hdr_enabled ? 1 : 0;
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_HDR, &hdr_enabled, sizeof(hdr_enabled));
             }
             else if (cmd_id == LINK_CMD_SET) {
-                /* Not implemented */
-                link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, NULL, 0);
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
+                uint32_t hdr_enabled = *(uint32_t*)data;
+                if (camera_csi_set_hdr_mode(config.camera_csi_config.cam_id, hdr_enabled) == 0) {
+                    config.camera_csi_config.hdr_enabled = hdr_enabled ? true : false;
+                    link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_HDR, &hdr_enabled, sizeof(hdr_enabled));
+                } else {
+                    uint32_t current_hdr = config.camera_csi_config.hdr_enabled ? 1 : 0;
+                    link_send_cmd(LINK_CMD_NACK, LINK_SUBCMD_HDR, &current_hdr, sizeof(current_hdr));
+                }
             }
             break;
         case LINK_SUBCMD_MIRROR_FLIP:
@@ -280,10 +340,15 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_MIRROR_FLIP, &mirror_flip, sizeof(mirror_flip));
             }
             else if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
                 uint32_t mirror_flip = *(uint32_t*)data;
                 config.camera_csi_config.mirror = (mirror_flip & 0x01) ? true : false;
                 config.camera_csi_config.flip = (mirror_flip & 0x02) ? true : false;
-                SAMPLE_COMM_ISP_SET_mirror(config.camera_csi_config.cam_id, mirror_flip);
+                set_camera_csi_mirror_flip(config.camera_csi_config.cam_id,
+                                         config.camera_csi_config.mirror,
+                                         config.camera_csi_config.flip);
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_MIRROR_FLIP, &mirror_flip, sizeof(mirror_flip));
             }
             break;
@@ -296,6 +361,9 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
             break;
         case LINK_SUBCMD_REBOOT:
             if (cmd_id == LINK_CMD_SET) {
+                if (size != sizeof(uint32_t)) {
+                    break;
+                }
                 uint32_t reboot_target = *(uint32_t*)data;
                 printf("Reboot command received for target: %u\n", reboot_target);
                 // Perform reboot based on target

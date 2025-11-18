@@ -90,6 +90,7 @@ typedef struct {
     // Backlight parameters
     bool backlight_enable;
     uint32_t backlight_strength;
+    bool hdr_enabled;
     pixfmt_t pixel_format;
 } camera_csi_config_t;
 

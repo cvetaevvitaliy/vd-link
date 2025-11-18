@@ -17,7 +17,7 @@ int camera_csi_init(camera_csi_config_t *cfg)
         return -1;
     }
 
-    if (SAMPLE_COMM_ISP_Init(cfg->cam_id, RK_AIQ_WORKING_MODE_NORMAL, RK_FALSE, DEFAULT_IQ_FILES_PATH)) {
+    if (SAMPLE_COMM_ISP_Init(cfg->cam_id, cfg->hdr_enabled ? RK_AIQ_WORKING_MODE_ISP_HDR2 : RK_AIQ_WORKING_MODE_NORMAL, RK_FALSE, DEFAULT_IQ_FILES_PATH)) {
         printf("ISP Init error!\n");
         return -1;
     }
@@ -132,6 +132,48 @@ int camera_csi_deinit(camera_csi_config_t *cfg)
     if (SAMPLE_COMM_ISP_Stop(cfg->cam_id)) {
         printf("ISP: Stop error!\n");
         return -1;
+    }
+    return 0;
+}
+
+int set_camera_csi_mirror_flip(int cam_id, bool mirror, bool flip)
+{
+    RK_U32 mirror_flip_value = mirror + flip * 2;
+    return SAMPLE_COMM_ISP_SET_mirror(cam_id, mirror_flip_value);
+}
+
+int set_camera_csi_brightness(int cam_id, uint32_t brightness)
+{
+    return SAMPLE_COMM_ISP_SET_Brightness(cam_id, brightness);
+}
+
+int set_camera_csi_contrast(int cam_id, uint32_t contrast)
+{
+    return SAMPLE_COMM_ISP_SET_Contrast(cam_id, contrast);
+}
+
+int set_camera_csi_saturation(int cam_id, uint32_t saturation)
+{
+    return SAMPLE_COMM_ISP_SET_Saturation(cam_id, saturation);
+}
+
+int set_camera_csi_sharpness(int cam_id, uint32_t sharpness)
+{
+    return SAMPLE_COMM_ISP_SET_Sharpness(cam_id, sharpness);
+}
+
+int camera_csi_set_hdr_mode(int cam_id, bool enable)
+{
+    if (enable) {
+        if (SAMPLE_COMM_ISP_SET_HDR(cam_id, RK_AIQ_WORKING_MODE_ISP_HDR2)) {
+            printf("ISP: Set HDR mode error!\n");
+            return -1;
+        }
+    } else {
+        if (SAMPLE_COMM_ISP_SET_HDR(cam_id, RK_AIQ_WORKING_MODE_NORMAL)) {
+            printf("ISP: Disable HDR mode error!\n");
+            return -1;
+        }
     }
     return 0;
 }
