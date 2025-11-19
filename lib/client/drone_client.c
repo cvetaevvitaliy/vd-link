@@ -286,6 +286,7 @@ static int register_drone(drone_client_handle_t* client) {
         "\"firmware_version\": \"%s\","
         "\"hardware_version\": \"%s\","
         "\"fc_variant\": \"%s\","
+        "\"vd_link_version\": \"%s-%s\","
         "\"owner_id\": \"%s\","
         "\"capabilities\": {"
             "\"video\": %s,"
@@ -298,6 +299,7 @@ static int register_drone(drone_client_handle_t* client) {
         client->config.firmware_version,
         client->config.hardware_version,
         client->config.fc_variant,
+        GIT_TAG, GIT_HASH,
         client->config.owner_id,
         client->config.video_capable ? "true" : "false",
         client->config.telemetry_capable ? "true" : "false",
