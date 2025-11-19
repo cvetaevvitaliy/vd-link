@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <math.h>
 #include "camera/camera_manager.h"
 #include "encoder/encoder.h"
 #include "common.h"
@@ -398,19 +399,30 @@ void link_rc_rx_callback(const uint16_t* channel_values, size_t channel_count)
     printf("\n");
 }
 
-static void update_rssi_on_fc(int rssi, int snr)
+static void update_rssi_on_fc(int rssi, float snr, int rsrp)
 {
-    update_telemetry_stats((int8_t)rssi, // Uplink RSSI 1
-                               0, // Uplink RSSI 2
-                               100,                       // Uplink quality (Placeholder)
-                               (int8_t)snr, // Uplink SNR
-                               0,                        // Downlink RSSI
-                               0,                        // Downlink quality
-                               0,                        // Downlink SNR
-                               0,                        // Active antenna
-                               0,                        // RF mode
-                               0                         // TX power
-                            ); // Placeholder values for downlink and other params.
+    uint8_t link_quality = 0;
+    if (rsrp >= -90) {
+        link_quality = 100;
+    } else if (rssi <= -120) {
+        link_quality = 0;
+    } else {
+        link_quality = (uint8_t)((rsrp + 120) * 100 / 30);
+    }
+    uint8_t rssi_u8 = -rssi;
+    uint8_t snr_u8 = roundf(snr);
+
+    update_telemetry_stats(rssi_u8,                  // Uplink RSSI 1
+                           0,                        // Uplink RSSI 2
+                           link_quality,             // Uplink quality (Placeholder)
+                           snr_u8,                   // Uplink SNR
+                           rssi_u8,                  // Downlink RSSI
+                           link_quality,             // Downlink quality
+                           snr_u8,                   // Downlink SNR
+                           0,                        // Active antenna
+                           0,                        // RF mode
+                           0                         // TX power
+                           );
 
 }
 
@@ -443,11 +455,11 @@ void send_telemetry_update_thread_fn(void)
                     telemetry.lte_signal.rsrq = lte_info.rsrq;
                     telemetry.lte_signal.rsrp = lte_info.rsrp;
                     telemetry.lte_signal.snr = lte_info.snr;
-                    update_rssi_on_fc((int)lte_info.rssi, (int)(lte_info.snr_valid ? lte_info.snr : 0));
+                    update_rssi_on_fc((int)lte_info.rssi, (float)(lte_info.snr_valid ? lte_info.snr : 0.0), (int)(lte_info.rsrp));
                 } else if (strcmp(lte_info.type, "wcdma") == 0) {
                     telemetry.phy_type = LINK_PHY_TYPE_WCDMA;
                     telemetry.wcdma_signal.rssi = lte_info.rssi;
-                    update_rssi_on_fc((int)lte_info.rssi, 0);
+                    update_rssi_on_fc((int)lte_info.rssi, 0, 0);
                 } else {
                     telemetry.phy_type = LINK_PHY_TYPE_UNKNOWN;
                 }
@@ -466,7 +478,7 @@ void send_telemetry_update_thread_fn(void)
 
         link_send_sys_telemetry(&telemetry);
 
-         send_telemetry_to_fc();
+        send_telemetry_to_fc();
 
         sleep(5); // Send telemetry every 5 seconds
 #if 0
