@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include "common.h"
+#include "addons/addons.h"
 #include "encoder/encoder.h"
 #include "config/config_parser.h"
 #include "config/drone_name.h"
@@ -37,6 +38,15 @@
 static volatile bool running = false;
 common_config_t config = {0}; // common configuration
 camera_manager_t camera_manager; // camera manager instance
+
+static bool is_debug_build(void)
+{
+#if defined(NDEBUG)
+    return false;
+#else
+    return true;
+#endif
+}
 
 
 static void signal_handler(int sig)
@@ -150,6 +160,23 @@ int main(int argc, char *argv[])
     // override config with command line args
     parse_args(argc, argv, &config);
     setup_signals();
+
+    addons_config_t addons_cfg = {
+        .plugin_directory = NULL,
+        .conf_file_path = PATH_TO_CONFIG_FILE,
+        .is_debug_build = is_debug_build(),
+        .scan_interval_ms = 5000,
+        .autocreate_directory = true,
+    };
+
+    if (addons_manager_init(&addons_cfg) == 0) {
+        atexit(addons_manager_shutdown);
+        addons_manager_force_rescan();
+    } else {
+        fprintf(stderr, "[ MAIN ] Warning: plugin manager disabled due to init failure\n");
+    }
+
+    return 0;
 
     printf("Configuration:\n");
     printf("RTP Streamer:\n");

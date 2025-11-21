@@ -25,6 +25,7 @@ Confirmed working on:
 - Zero-copy rendering via MPP -> RGA (for rotate frame) -> DRM (Rockchip)
 - OSD overlays using PNG fonts and MSP Display Port
 - Font system with support for **Betaflight/INAV/ArduPilot** styles
+- Hot-reloadable addon/plugin system (see [docs/PLUGINS.md](docs/PLUGINS.md))
 
 ---
 
