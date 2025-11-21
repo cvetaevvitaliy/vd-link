@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 2.8...3.13)
 project(vd-link-${PLATFORM} C)
 
+set(VDLINK_PLUGIN_INSTALL_SUBDIR "lib/vd-link/plugins" CACHE STRING "Relative installation path for VD-Link plugins")
+if (IS_ABSOLUTE "${VDLINK_PLUGIN_INSTALL_SUBDIR}")
+        set(VDLINK_PLUGIN_RUNTIME_DIR "${VDLINK_PLUGIN_INSTALL_SUBDIR}")
+else()
+        set(VDLINK_PLUGIN_RUNTIME_DIR "${CMAKE_INSTALL_PREFIX}/${VDLINK_PLUGIN_INSTALL_SUBDIR}")
+endif()
+
 if (CMAKE_SYSROOT) # already defined
     message(STATUS "CMAKE_SYSROOT already defined: ${CMAKE_SYSROOT}")
 else()
@@ -114,10 +121,13 @@ include_directories(${PROJECT_NAME}
 )
 
 add_subdirectory(src/fc_conn)
+add_subdirectory(src/addons/plugins)
 
 add_executable(${PROJECT_NAME}
         src/camera/isp/sample_common_isp.c
         src/main.c
+        src/addons/addons.c
+        src/addons/subsystem_api.c
         src/encoder/encoder.c
         src/camera/camera_csi.c
         src/camera/camera_usb.c
@@ -139,6 +149,7 @@ target_link_libraries(${PROJECT_NAME}
         rga
         easymedia
         pthread
+        dl
         m
         rtp
         msp
@@ -150,6 +161,9 @@ target_link_libraries(${PROJECT_NAME}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
 )
+
+# target_compile_definitions(${PROJECT_NAME}
+#         PRIVATE VDLINK_DEFAULT_PLUGIN_DIR="${VDLINK_PLUGIN_RUNTIME_DIR}")
 
 
 ###########################################################################

@@ -13,7 +13,7 @@
 
 #include "log.h"
 
-const char* module_name_str = "PROXY";
+static const char* module_name_str = "PROXY";
 
 static bool proxy_active = false;
 static char current_remote_ip[256] = {0};
