@@ -23,16 +23,102 @@ typedef enum {
 	SUBSYS_LOG_DEBUG
 } subsystem_log_severity_t;
 
-typedef void (*subsystem_log_fn)(subsystem_log_severity_t severity,
-								 const char *component,
-								 const char *message,
-								 void *user_data);
+typedef enum {
+	SUBSYS_OVERLAY_COLOR_WHITE = 0,
+	SUBSYS_OVERLAY_COLOR_BLACK,
+	SUBSYS_OVERLAY_COLOR_RED,
+	SUBSYS_OVERLAY_COLOR_GREEN,
+	SUBSYS_OVERLAY_COLOR_BLUE,
+	SUBSYS_OVERLAY_COLOR_YELLOW,
+	SUBSYS_OVERLAY_COLOR_CYAN,
+	SUBSYS_OVERLAY_COLOR_MAGENTA
+} subsystem_overlay_color_e;
 
+typedef struct {
+	float x;
+	float y;
+} subsystem_overlay_point_norm_t;
+
+typedef struct {
+	struct {
+		float roll;
+		float pitch;
+		float yaw;
+	} attitude;
+	float altitude_m;
+	uint16_t rc_channels[16];
+} fc_properties_t;
+
+
+typedef void (*subsystem_log_fn)(subsystem_log_severity_t severity,
+	const char *component,
+	const char *message,
+	void *user_data);
+
+
+typedef void (*fc_property_update_callback_t)(const fc_properties_t *properties, uint64_t* timestamp_ms);
+	
 typedef int (*subsystem_enable_rc_override_fn)(const uint16_t *channels,
 												 size_t channel_count);
 
+typedef int (*subsystem_send_rc_buf_override_fn)(const uint16_t *channels,
+												 size_t channel_count);
+
+typedef int (*subsystem_send_rc_override_fn)(uint16_t throttle,
+											 uint16_t yaw,
+											 uint16_t pitch,
+											 uint16_t roll,
+											 uint16_t aux1,
+											 uint16_t aux2,
+											 uint16_t aux3,
+											 uint16_t aux4);
+typedef int (*subsystem_register_fc_property_update_callback_fn)(fc_property_update_callback_t callback,
+																   uint32_t frequency_hz);												 
+
+typedef int (*subsystem_overlay_draw_text_fn)(subsystem_overlay_point_norm_t point,
+											 const char *text,
+											 subsystem_overlay_color_e color,
+											 int size);
+
+typedef int (*subsystem_overlay_draw_rectangle_fn)(subsystem_overlay_point_norm_t left_top,
+													subsystem_overlay_point_norm_t right_bottom,
+													subsystem_overlay_color_e color,
+													int thickness);
+typedef int (*subsystem_overlay_draw_crosshair_fn)(subsystem_overlay_point_norm_t center,
+													float size,
+													subsystem_overlay_color_e color,
+													int thickness);
+
+typedef int (*subsystem_overlay_draw_screen_fn)(void);
+
+typedef int (*subsystem_overlay_clear_fn)(void);
+
+typedef int (*subsystem_video_start_receiving_stream_fn)(uint32_t width, uint32_t height);
+
+typedef int (*subsystem_video_stop_receiving_stream_fn)(void);
+
+typedef int (*subsystem_video_get_stream_frame_fn)(uint8_t* frame_data, size_t *frame_size, uint64_t *timestamp_ms);
+
+
 typedef struct subsystem_host_api_s {
+	struct {
 	subsystem_enable_rc_override_fn enable_rc_override;
+	subsystem_send_rc_buf_override_fn send_rc_buf_override;
+    subsystem_send_rc_override_fn send_rc_override;
+    subsystem_register_fc_property_update_callback_fn register_fc_property_update_callback;
+	} fc;
+	struct {
+		subsystem_overlay_draw_text_fn draw_text;
+		subsystem_overlay_draw_rectangle_fn draw_rectangle;
+		subsystem_overlay_draw_crosshair_fn draw_crosshair;
+		subsystem_overlay_draw_screen_fn draw_screen;
+		subsystem_overlay_clear_fn clear;
+	} overlay;
+	struct {
+		subsystem_video_start_receiving_stream_fn start_receiving_stream;
+		subsystem_video_stop_receiving_stream_fn stop_receiving_stream;
+		subsystem_video_get_stream_frame_fn get_stream_frame;
+	} video;
 } subsystem_host_api_t;
 
 typedef struct subsystem_context_s {
