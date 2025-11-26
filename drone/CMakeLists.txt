@@ -152,7 +152,7 @@ add_executable(${PROJECT_NAME}
         # src/rknn/yolov5/yolov5.c
         src/rknn/yolov5/rknn_yolov5.c
         src/rknn/rknn.c
-        src/rknn/overlay.c
+        src/encoder/overlay.c
 )
 
 target_link_libraries(${PROJECT_NAME}
