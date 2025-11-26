@@ -26,6 +26,7 @@
 #include "proxy/proxy.h"
 #include "link.h"
 #include "hal/cpuinfo.h"
+#include "rknn/rknn.h"
 #include "pidfile.h"
 
 #define PROC_NAME "vd-link-drone"
@@ -47,7 +48,6 @@ static bool is_debug_build(void)
     return true;
 #endif
 }
-
 
 static void signal_handler(int sig)
 {
@@ -138,6 +138,7 @@ static void parse_args(int argc, char* argv[], common_config_t* config)
 int main(int argc, char *argv[])
 {
     int ret = 0;
+    running = true;
 
     screensaver_nv12_t screensaver; // screensaver frame (if camera not available)
 
@@ -218,6 +219,9 @@ int main(int argc, char *argv[])
     camera_manager_print_all(&camera_manager);
     camera_info_t *primary_camera = camera_manager_get_primary(&camera_manager);
 
+    // Start RKNN thread for object detection
+    rknn_thread_start();
+
     // Connect to flight controller early to get device UID
     if (connect_to_fc(DEFAULT_SERIAL, 115200) != 0) {
         printf("Failed to connect to flight controller\n");
@@ -231,6 +235,9 @@ int main(int argc, char *argv[])
                 printf("Got all FC properties\n");
             break;
             }
+            if (running == false) {
+                break;
+            }
             usleep(500 * 1000); // 500ms
         }
         if (!is_all_fc_properties_ready()) {
@@ -243,21 +250,21 @@ int main(int argc, char *argv[])
                                         get_drone_name(config.server_config.drone_id),
                                         get_device_uid(),
                                         get_cpu_serial_number());
-        
     }
 
-    // Initialize remote client (optional, based on config) before RTP streamer
-    ret = remote_client_init(&config);
-    if (ret != 0) {
-        printf("Failed to initialize remote client\n");
-    }
+    if (running) {
+        // Initialize remote client (optional, based on config) before RTP streamer
+        ret = remote_client_init(&config);
+        if (ret != 0) {
+            printf("Failed to initialize remote client\n");
+        }
 
-    // Initialize proxy module
-    ret = proxy_init();
-    if (ret != 0) {
-        printf("Failed to initialize proxy module\n");
-        return -1;
-    }
+        // Initialize proxy module
+        ret = proxy_init();
+        if (ret != 0) {
+            printf("Failed to initialize proxy module\n");
+            return -1;
+        }
 
     ret = link_init(LINK_DRONE);
     if (ret != 0) {
@@ -283,13 +290,13 @@ int main(int argc, char *argv[])
             printf(" Command port: %d\n", server_command_port);
             printf(" Control port: %d\n", server_control_port);
 
-            // Setup proxy tunnels to redirect local ports to server
-            ret = proxy_setup_tunnels(server_stream_ip, server_stream_port, server_telemetry_port, server_command_port, server_control_port);
-            if (ret != 0) {
-                printf("Warning: Failed to setup proxy tunnels\n");
-            } else {
-                printf("Proxy tunnels configured successfully\n");
-            }
+                // Setup proxy tunnels to redirect local ports to server
+                ret = proxy_setup_tunnels(server_stream_ip, server_stream_port, server_telemetry_port, server_command_port, server_control_port);
+                if (ret != 0) {
+                    printf("Warning: Failed to setup proxy tunnels\n");
+                } else {
+                    printf("Proxy tunnels configured successfully\n");
+                }
 
             printf("Updated RTP streamer configuration with server values\n");
         } else {
@@ -299,15 +306,15 @@ int main(int argc, char *argv[])
         printf("Remote client not enabled or failed to start, using local network configuration\n");
     }
 
-    ret = rtp_streamer_init(&config);
-    if (ret != 0) {
-        printf("Failed to initialize RTP streamer\n");
-        remote_client_stop();
-        remote_client_cleanup();
-        proxy_cleanup();
-        config_cleanup(&config);
-        return -1;
-    }
+        ret = rtp_streamer_init(&config);
+        if (ret != 0) {
+            printf("Failed to initialize RTP streamer\n");
+            remote_client_stop();
+            remote_client_cleanup();
+            proxy_cleanup();
+            config_cleanup(&config);
+            return -1;
+        }
 
     ret = encoder_init(&config.encoder_config);
     if (ret != 0) {
@@ -320,50 +327,50 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    link_register_cmd_rx_cb(link_cmd_rx_callback);
-    link_register_rc_rx_cb(link_rc_rx_callback);
+        link_register_cmd_rx_cb(link_cmd_rx_callback);
+        link_register_rc_rx_cb(link_rc_rx_callback);
 
-    // Start telemetry thread
-    ret = link_start_telemetry_thread();
-    if (ret != 0) {
-        printf("Failed to start telemetry thread\n");
-        encoder_clean();
-        rtp_streamer_deinit();
-        remote_client_stop();
-        remote_client_cleanup();
-        proxy_cleanup();
-        config_cleanup(&config);
-        return -1;
-    }
-
-    // Start keepalive thread to maintain NAT connection
-    ret = link_start_rtt_check(5000); // Send keepalive every 5 seconds
-    if (ret != 0) {
-        printf("Failed to start keepalive thread\n");
-        /* Not a critical issue, continue working */
-    }
-
-    /* Init and bind camera to encoder */
-    ret = camera_select_camera(&camera_manager, &config, primary_camera);
-    if (ret != 0) {
-        printf("Failed to initialize primary camera\n");
-        /* Not a critical issue, continue working */
-    }
-
-    /*If no camera is detected, use screensaver */
-    if (!camera_manager_get_current_camera(&camera_manager)) {
-        printf("No camera detected, using screensaver\n");
-        int ret = screensaver_prepare_no_camera_screen(config.stream_width, config.stream_height, &screensaver);
+        // Start telemetry thread
+        ret = link_start_telemetry_thread();
         if (ret != 0) {
-            printf("Failed to create screensaver frame\n");
+            printf("Failed to start telemetry thread\n");
             encoder_clean();
             rtp_streamer_deinit();
+            remote_client_stop();
+            remote_client_cleanup();
+            proxy_cleanup();
             config_cleanup(&config);
             return -1;
         }
+
+        // Start keepalive thread to maintain NAT connection
+        ret = link_start_rtt_check(5000); // Send keepalive every 5 seconds
+        if (ret != 0) {
+            printf("Failed to start keepalive thread\n");
+            /* Not a critical issue, continue working */
+        }
+
+        /* Init and bind camera to encoder */
+        ret = camera_select_camera(&camera_manager, &config, primary_camera);
+        if (ret != 0) {
+            printf("Failed to initialize primary camera\n");
+            /* Not a critical issue, continue working */
+        }
+
+        /*If no camera is detected, use screensaver */
+        if (!camera_manager_get_current_camera(&camera_manager)) {
+            printf("No camera detected, using screensaver\n");
+            int ret = screensaver_prepare_no_camera_screen(config.stream_width, config.stream_height, &screensaver);
+            if (ret != 0) {
+                printf("Failed to create screensaver frame\n");
+                encoder_clean();
+                rtp_streamer_deinit();
+                config_cleanup(&config);
+                return -1;
+            }
+        }
     }
 
-    running = true;
     while (running) {
         if (!camera_manager_get_current_camera(&camera_manager)) {
             encoder_manual_push_frame(&config.encoder_config, screensaver.data, (int)screensaver.size_bytes);
@@ -379,8 +386,10 @@ int main(int argc, char *argv[])
         camera_manager_deinit_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
     }
 
+    rknn_thread_stop();
     camera_csi_deinit(&config.camera_csi_config);
     link_stop_telemetry_thread();
+    disconnect_from_fc();
 
     // Cleanup remote client
     remote_client_cleanup();

@@ -540,6 +540,7 @@ int link_start_telemetry_thread()
 
 void link_stop_telemetry_thread()
 {
+    if (!running) return;
     running = false;
     pthread_join(telemetry_thread, NULL);
 }

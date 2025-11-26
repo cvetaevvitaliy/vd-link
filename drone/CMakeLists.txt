@@ -109,6 +109,8 @@ endif()
 
 pkg_check_modules(JSON-C REQUIRED json-c)
 
+add_definitions(-DRKNPU1=1)
+
 include_directories(${PROJECT_NAME}
         ${RKAIQ_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -119,6 +121,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/ini/src
         ${CMAKE_SOURCE_DIR}/lib/client
         ${CMAKE_SOURCE_DIR}/lib/pidfile
+        ${CMAKE_SOURCE_DIR}/src/rknn/yolov5
 )
 
 add_subdirectory(src/fc_conn)
@@ -145,6 +148,11 @@ add_executable(${PROJECT_NAME}
         src/hal/transport.c
         src/remote_client/remote_client.c
         src/proxy/proxy.c
+        src/rknn/yolov5/postprocess.c
+        # src/rknn/yolov5/yolov5.c
+        src/rknn/yolov5/rknn_yolov5.c
+        src/rknn/rknn.c
+        src/rknn/overlay.c
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -160,6 +168,7 @@ target_link_libraries(${PROJECT_NAME}
         fc_conn
         drone_client
         pidfile
+        rknn_api
         ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}

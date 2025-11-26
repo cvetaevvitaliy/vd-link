@@ -129,7 +129,7 @@ int msp_interface_init(msp_interface_t* dev)
 
 int msp_interface_write(msp_interface_t* dev, uint8_t* buff, int len)
 {
-    printf("[MSP] Writing %d bytes to FC (%s)\n", len, buff);
+    //printf("[MSP] Writing %d bytes to FC (%s)\n", len, buff);
     ssize_t result = write(dev->uart_fd, buff, len);
     if (result != (ssize_t)len) {
         perror("failed to write to port");

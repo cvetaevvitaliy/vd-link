@@ -14,6 +14,9 @@
 #include "camera/camera_csi.h"
 #include "camera/camera_usb.h"
 #include "encoder/encoder.h"
+#include "rknn/rknn.h"
+
+#include <easymedia/rkmedia_buffer.h>
 
 // Forward declarations
 static camera_sensor_t get_sensor_from_names(const char *driver, const char *card, 
@@ -762,15 +765,29 @@ int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *confi
     if (!manager || manager->count == 0 || !config || !camera) {
         return -1;
     }
+    int model_width = 0, model_height = 0;
+    rknn_model_info_t *rknn_info = rknn_get_model_info();
+    if (rknn_info) {
+        model_width = rknn_info->width;
+        model_height = rknn_info->height;
+    }
 
     if (camera->type == CAMERA_CSI) {
         encoder_set_input_image_format(config->camera_csi_config.pixel_format,
                                        config->camera_csi_config.width, config->camera_csi_config.height);
         camera_csi_bind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
+
+        // Bind camera to RKNN via RGA CAM_ID->CH1
+        if (model_width > 0 && model_height > 0) {
+            camera_csi_bind_rknn(config->camera_csi_config.cam_id,1 /* camera channel */,
+                                1 /* rga channel */,
+                                model_width, model_height);
+        }
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
         encoder_set_input_image_format(config->camera_usb_config.pixel_format,
                                        config->camera_usb_config.width, config->camera_usb_config.height);
         camera_usb_bind_encoder(config->camera_usb_config.device_index, 0 /* encoder id */);
+        // TODO: add RKNN binding for USB cameras
     }
 
     return 0;
