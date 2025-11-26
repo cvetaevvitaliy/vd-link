@@ -115,11 +115,11 @@ static void demo_overlay_api(const subsystem_context_t *ctx)
     if (api->overlay.clear) {
         api->overlay.clear();
     }
-    if (api->overlay.draw_text) {
-        api->overlay.draw_text(top_left, osd_text, SUBSYS_OVERLAY_COLOR_GREEN,  255, 2);
-    }
     if (api->overlay.draw_rectangle) {
         api->overlay.draw_rectangle(top_left, bottom_right, SUBSYS_OVERLAY_COLOR_BLUE, 255, 10);
+    }
+    if (api->overlay.draw_text) {
+        api->overlay.draw_text(top_left, osd_text, SUBSYS_OVERLAY_COLOR_GREEN,  255, 40);
     }
     if (api->overlay.draw_crosshair) {
         api->overlay.draw_crosshair(center, 0.1f, SUBSYS_OVERLAY_COLOR_WHITE, 255, 10);

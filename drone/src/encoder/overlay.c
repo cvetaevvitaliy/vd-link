@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <cairo/cairo.h>
 #include "overlay.h"
 #include "encoder/encoder.h"
 
@@ -190,11 +191,71 @@ void overlay_draw_crosshair(int x, int y, int size,
 void overlay_draw_text(int x, int y, const char *text,
                        uint32_t argb_color, int size)
 {
-    // Simple placeholder: draw a rectangle representing text area
-    int text_width = (int)(size * 0.6f * strlen(text)); // Approximate width
-    int text_height = size; // Approximate height
+    if (!text || !overlay_buffer) return;
+    
+    // Create Cairo surface from overlay buffer
+    cairo_surface_t *surface = cairo_image_surface_create_for_data(
+        overlay_buffer,
+        CAIRO_FORMAT_ARGB32,
+        overlay_buffer_width,
+        overlay_buffer_height,
+        overlay_buffer_width * OVERLAY_BPP
+    );
+    
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surface);
+        return;
+    }
+    
+    cairo_t *cr = cairo_create(surface);
+    
+    // Extract ARGB components
+    double alpha = ((argb_color >> 24) & 0xFF) / 255.0;
+    double red   = ((argb_color >> 16) & 0xFF) / 255.0;
+    double green = ((argb_color >> 8) & 0xFF) / 255.0;
+    double blue  = (argb_color & 0xFF) / 255.0;
+    
+    // Set font
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, size);
+    
+    // Set color
+    cairo_set_source_rgba(cr, red, green, blue, alpha);
+    
+    // Position text
+    cairo_move_to(cr, x, y + size); // y + size because Cairo text baseline is at bottom
+    
+    // Draw text
+    cairo_show_text(cr, text);
+    
+    // Cleanup
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+}
 
-    overlay_draw_rect(x, y, x + text_width, y + text_height, argb_color, 1); // replace with actual text rendering
+void overlay_measure_text(const char *text, int size, int *width, int *height)
+{
+    if (!text) {
+        if (width) *width = 0;
+        if (height) *height = 0;
+        return;
+    }
+    
+    // Create temporary surface for measurement
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(surface);
+    
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, size);
+    
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, text, &extents);
+    
+    if (width) *width = (int)(extents.width + 0.5);
+    if (height) *height = (int)(extents.height + 0.5);
+    
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
 }
 
 /* Send current overlay buffer to encoder */
