@@ -15,7 +15,7 @@
 #define RTP_CLOCK_RATE 90000
 
 static encoder_callback enc_callback;
-extern common_config_t config;
+extern common_config_t config; // from common.c
 
 static inline uint64_t monotonic_time_us(void) {
     struct timespec ts;
@@ -87,10 +87,12 @@ static int init_overlay_region(int venc_chn, int region_id, encoder_config_t *en
     if (!enc_cfg) return -1;
 
     // Align to 16 as required by RKMEDIA
-    uint32_t w = align_down((uint32_t)enc_cfg->osd_config.width, 16);
-    uint32_t h = align_down((uint32_t)enc_cfg->osd_config.height, 16);
-    uint32_t x = align_down((uint32_t)enc_cfg->osd_config.pos_x, 16);
-    uint32_t y = align_down((uint32_t)enc_cfg->osd_config.pos_y, 16);
+    uint32_t w = align_down((uint32_t)enc_cfg->width, 16);
+    uint32_t h = align_down((uint32_t)enc_cfg->height, 16);
+    // uint32_t x = align_down((uint32_t)enc_cfg->osd_config.pos_x, 16);
+    // uint32_t y = align_down((uint32_t)enc_cfg->osd_config.pos_y, 16);
+    uint32_t x = 0;
+    uint32_t y = 0;
 
     // Guard against zero after alignment
     if (w == 0 || h == 0) {
@@ -367,6 +369,11 @@ int encoder_set_input_image_format(pixfmt_t  pixel_format, int width, int height
     return 0;
 }
 
+encoder_config_t* encoder_get_input_image_format(void)
+{
+    return &config.encoder_config;
+}
+
 void encoder_focus_mode(encoder_config_t *cfg)
 {
     VENC_ROI_ATTR_S roi_attr[1];
@@ -457,18 +464,29 @@ int encoder_manual_push_frame(encoder_config_t *cfg, void *data, int size)
     return 0;
 }
 
-int encoder_draw_overlay_buffer(const encoder_osd_config_t *cfg, const void *data, size_t size)
+int encoder_draw_overlay_buffer(const void *data, int width, int height)
 {
-    if (!cfg || !data) {
+    if (!data) {
         fprintf(stderr, "%s: null args\n", __FUNCTION__);
+        return -1;
+    }
+    if (width != config.encoder_config.width ||
+        height != config.encoder_config.height) {
+        fprintf(stderr, "%s: size mismatch (got %dx%d, expect %dx%d)\n",
+                __FUNCTION__, width, height,
+                config.encoder_config.width,
+                config.encoder_config.height);
         return -1;
     }
 
     // 16-align as required by RKMEDIA
-    uint32_t w = align_down((uint32_t)cfg->width,  16);
-    uint32_t h = align_down((uint32_t)cfg->height, 16);
-    uint32_t x = align_down((uint32_t)cfg->pos_x,  16);
-    uint32_t y = align_down((uint32_t)cfg->pos_y,  16);
+    uint32_t w = align_down( config.encoder_config.width,  16);
+    uint32_t h = align_down( config.encoder_config.height, 16);
+    // uint32_t x = align_down((uint32_t)cfg->pos_x,  16);
+    // uint32_t y = align_down((uint32_t)cfg->pos_y,  16);
+    uint32_t x = align_down(0,  16);
+    uint32_t y = align_down(0,  16);
+
 
     if (w == 0 || h == 0) {
         return 0;

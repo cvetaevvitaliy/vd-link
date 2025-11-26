@@ -25,6 +25,7 @@
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <errno.h>
+    #include <fcntl.h>
 #endif
 
 #define MODULE_NAME_STR "LINK"
@@ -181,6 +182,71 @@ static void* link_listener_thread_func(void* arg);
 static void* rtt_check_thread_func(void* arg);
 static int link_process_incoming_data(const char* data, size_t size);
 
+/* Set socket to non-blocking mode (cross platform) */
+static int set_socket_nonblocking(int sockfd)
+{
+#ifdef _WIN32
+    u_long mode = 1;
+    if (ioctlsocket(sockfd, FIONBIO, &mode) != 0) {
+        int err = WSAGetLastError();
+        ERROR("ioctlsocket(FIONBIO) failed: %d", err);
+        return -1;
+    }
+#else
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags == -1) {
+        PERROR("fcntl(F_GETFL) failed");
+        return -1;
+    }
+    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        PERROR("fcntl(F_SETFL O_NONBLOCK) failed");
+        return -1;
+    }
+#endif
+    return 0;
+}
+
+/* Non-blocking UDP send wrapper.
+ * Drops packet if send would block instead of blocking the caller. */
+static int link_send_packet(const void *buf, size_t len)
+{
+    if (link_ctx.send_sockfd < 0) {
+        ERROR("Send socket is not initialized");
+        return -1;
+    }
+
+    ssize_t sent = sendto(link_ctx.send_sockfd,
+                          (const char*)buf,
+                          (int)len,
+                          0,
+                          (struct sockaddr*)&link_ctx.sender_addr,
+                          sizeof(link_ctx.sender_addr));
+    if (sent < 0) {
+#ifdef _WIN32
+        int error = WSAGetLastError();
+        if (error == WSAEWOULDBLOCK) {
+            DEBUG("sendto would block, dropping packet (len=%zu)", len);
+            return 0; // не вважаємо це фатальною помилкою
+        }
+        ERROR("sendto failed with error: %d", error);
+#else
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            DEBUG("sendto would block, dropping packet (len=%zu)", len);
+            return 0; // не блокуємо, просто дроп
+        }
+        PERROR("sendto");
+#endif
+        return -1;
+    }
+
+    if ((size_t)sent != len) {
+        ERROR("sendto sent partial packet: %zd/%zu bytes", sent, len);
+        return -1;
+    }
+
+    return 0;
+}
+
 static void* rtt_check_thread_func(void* arg)
 {
     (void)arg;
@@ -228,7 +294,8 @@ static void* link_listener_thread_func(void* arg)
     struct sockaddr_in received_from_addr;  // Separate variable for received packet sender
     
     INFO("Listener thread started");
-    
+
+#if 0
     while (run) {
         socklen_t addr_len = sizeof(received_from_addr);
         ssize_t bytes_received = recvfrom(link_ctx.listen_sockfd, buffer, sizeof(buffer), 0,
@@ -268,7 +335,61 @@ static void* link_listener_thread_func(void* arg)
         }
         link_process_incoming_data(buffer, bytes_received);
     }
-    
+#endif
+    while (run) {
+        socklen_t addr_len = sizeof(received_from_addr);
+        ssize_t bytes_received = recvfrom(link_ctx.listen_sockfd,
+                                          buffer,
+                                          sizeof(buffer),
+                                          0,
+                                          (struct sockaddr*)&received_from_addr,
+                                          &addr_len);
+        if (bytes_received < 0) {
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error == WSAEWOULDBLOCK) {
+                /* No data available right now, avoid busy loop */
+                Sleep(1); // 1 ms
+                continue;
+            }
+            if (error == WSAENOTSOCK || error == WSAEINVAL || error == WSAECONNABORTED) {
+                // Socket was closed, exit gracefully
+                DEBUG("Socket closed, listener thread exiting");
+                break;
+            } else if (error != WSAEINTR && error != WSAECONNRESET) {
+                ERROR("recvfrom failed with error: %d", error);
+            }
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* No data available, sleep a bit and check run flag again */
+                usleep(1000); // 1 ms
+                continue;
+            }
+            if (errno == EBADF || errno == ENOTSOCK) {
+                // Socket was closed, exit gracefully
+                DEBUG("Socket closed, listener thread exiting");
+                break;
+            } else if (errno != EINTR) {
+                PERROR("recvfrom");
+            }
+#endif
+            continue;
+        }
+
+        if (bytes_received == 0) {
+            // This shouldn't happen with UDP, but just in case
+            DEBUG("Received 0 bytes, continuing");
+            continue;
+        }
+
+        // Process the received data
+        if (memcmp(buffer, "subscribe", 9) == 0) {
+            /* keepalive packet */
+            continue;
+        }
+        link_process_incoming_data(buffer, (size_t)bytes_received);
+    }
+
     INFO("Listener thread finished");
 #ifdef _WIN32
     return 0;
@@ -464,6 +585,25 @@ int link_init(link_role_t is_gs)
     link_ctx.listen_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (link_ctx.listen_sockfd < 0) {
         PERROR("Failed to create listen socket");
+        close(link_ctx.send_sockfd);
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
+        return -1;
+    }
+
+    /* Make sockets non-blocking */
+    if (set_socket_nonblocking(link_ctx.listen_sockfd) < 0) {
+        ERROR("Failed to set listener socket non-blocking");
+        close(link_ctx.listen_sockfd);
+        close(link_ctx.send_sockfd);
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
+        return -1;
+    }
+
+    if (set_socket_nonblocking(link_ctx.send_sockfd) < 0) {
+        ERROR("Failed to set send socket non-blocking");
+        close(link_ctx.listen_sockfd);
         close(link_ctx.send_sockfd);
         pthread_cond_destroy(&sync_cmd_ctx.cond);
         pthread_mutex_destroy(&sync_cmd_ctx.mutex);
