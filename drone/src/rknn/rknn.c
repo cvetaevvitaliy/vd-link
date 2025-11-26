@@ -9,7 +9,7 @@
 //#include "rknn/yolov5/yolov5.h"
 #include "rknn.h"
 
-#include "overlay.h"
+#include "encoder/overlay.h"
 #include <stdlib.h>
 #include <string.h>
 #include "camera/camera_manager.h"
