@@ -55,15 +55,33 @@ typedef void (*subsystem_log_fn)(subsystem_log_severity_t severity,
 	const char *message,
 	void *user_data);
 
-
+/* Callback prototype for flight controller property updates;
+	@param properties Pointer to fc_properties_t structure with updated values
+	@param timestamp_ms Pointer to variable to receive timestamp in milliseconds
+*/
 typedef void (*fc_property_update_callback_t)(const fc_properties_t *properties, uint64_t* timestamp_ms);
 	
-typedef int (*subsystem_enable_rc_override_fn)(const uint16_t *channels,
+typedef int (*subsystem_enable_rc_override_fn)(const uint8_t *channels,
 												 size_t channel_count);
 
+/* Send RC override using buffer of channel values
+    @param channels Pointer to array of channel values (uint16_t)
+	@param channel_count Number of channels in the array
+*/
 typedef int (*subsystem_send_rc_buf_override_fn)(const uint16_t *channels,
 												 size_t channel_count);
 
+/* Send RC override using individual channel values;
+	Channell map will be negotiated with flight controller; 
+	@param throttle Throttle channel value
+	@param yaw Yaw channel value
+	@param pitch Pitch channel value
+	@param roll Roll channel value
+	@param aux1 Auxiliary channel 1 value
+	@param aux2 Auxiliary channel 2 value
+	@param aux3 Auxiliary channel 3 value
+	@param aux4 Auxiliary channel 4 value
+*/
 typedef int (*subsystem_send_rc_override_fn)(uint16_t throttle,
 											 uint16_t yaw,
 											 uint16_t pitch,
@@ -72,31 +90,71 @@ typedef int (*subsystem_send_rc_override_fn)(uint16_t throttle,
 											 uint16_t aux2,
 											 uint16_t aux3,
 											 uint16_t aux4);
+
+/* Register callback for flight controller property updates
+	@param callback Function pointer to be invoked on property updates
+	@param frequency_hz Frequency in Hz for callback invocation
+*/
 typedef int (*subsystem_register_fc_property_update_callback_fn)(fc_property_update_callback_t callback,
 																   uint32_t frequency_hz);												 
 
+/* Draw text on overlay
+	@param point Normalized point (0.0 - 1.0) for text position
+	@param text Null-terminated string to draw
+	@param color Color enum value
+	@param size Font size in points
+*/
 typedef int (*subsystem_overlay_draw_text_fn)(subsystem_overlay_point_norm_t point,
 											 const char *text,
 											 subsystem_overlay_color_e color,
 											 int size);
 
+/* Draw rectangle on overlay
+	@param left_top Normalized point (0.0 - 1.0) for top-left corner
+	@param right_bottom Normalized point (0.0 - 1.0) for bottom-right corner
+	@param color Color enum value
+	@param thickness Line thickness in pixels
+*/
 typedef int (*subsystem_overlay_draw_rectangle_fn)(subsystem_overlay_point_norm_t left_top,
 													subsystem_overlay_point_norm_t right_bottom,
 													subsystem_overlay_color_e color,
 													int thickness);
+
+/* Draw crosshair on overlay
+	@param center Normalized point (0.0 - 1.0) for crosshair center
+	@param size Size of the crosshair (0.0 - 1.0)
+	@param color Color enum value
+	@param thickness Line thickness in pixels
+*/
 typedef int (*subsystem_overlay_draw_crosshair_fn)(subsystem_overlay_point_norm_t center,
 													float size,
 													subsystem_overlay_color_e color,
 													int thickness);
 
+/* Draw screen on overlay; 
+	Should be called after all drawing commands are issued
+*/
 typedef int (*subsystem_overlay_draw_screen_fn)(void);
 
+/* Clear overlay drawings;
+*/
 typedef int (*subsystem_overlay_clear_fn)(void);
 
+/* Start receiving video stream;
+	@param width Desired stream width
+	@param height Desired stream height
+*/
 typedef int (*subsystem_video_start_receiving_stream_fn)(uint32_t width, uint32_t height);
 
+/* Stop receiving video stream;
+*/
 typedef int (*subsystem_video_stop_receiving_stream_fn)(void);
 
+/* Get video stream frame;
+	@param frame_data Pointer to buffer to receive frame data
+	@param frame_size Pointer to variable to receive frame size
+	@param timestamp_ms Pointer to variable to receive frame timestamp in milliseconds
+*/
 typedef int (*subsystem_video_get_stream_frame_fn)(uint8_t* frame_data, size_t *frame_size, uint64_t *timestamp_ms);
 
 

@@ -17,6 +17,21 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
+
+/* Constants for communication with crsf_udp_bridge
+ Each UDP message will contain first byte as message type 
+ */
+/* Link statistics send just as a structure alligned in both applications */
+#define CRSF_TYPE_LINK_STATISTICS  0x14
+/* RC channel for override stream grom GS. Assume AETR1234 */
+#define CRSF_TYPE_RC_CHANNELS      0x16
+/* Enable or disable RC override. When enabled, the last RC overrided channels will be sendt constantly */
+#define CRSF_TYPE_ENABLE_OVERRIDE  0xF0
+
+#define CRSF_TYPE_LAST_ORIGINAL_RC 0xF1
+#define CRSF_RC_CHANNELS_COUNT     16
+
 
 #define OSD_DEFAULT_CHAR_X    53
 #define OSD_DEFAULT_CHAR_Y    20
@@ -65,6 +80,11 @@ static pthread_t fc_read_thread;
 static pthread_t fc_write_thread;
 static pthread_mutex_t aggr_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static fc_property_update_callback_t fc_property_update_cb = NULL;
+static uint32_t fc_property_update_frequency_hz = 0;
+static fc_properties_t last_fc_properties = {0};
+static pthread_mutex_t fc_properties_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0, 0}, {NULL, 0, 0}};
 static uint8_t current_aggregation_buffer = 0;
 #if SEND_OSD_ON_CHANGE_ONLY
@@ -95,6 +115,83 @@ typedef struct {
 
 // Telemetry data
 static crsf_link_statistics_t link_stats = {0};
+
+/* Telemetry socket globals */
+static int g_crsf_udp_bridge_sock = -1;
+static struct sockaddr_in g_crsf_udp_bridge_addr = {0};
+static bool g_crsf_udp_bridge_addr_initialized = false;
+
+/* Local bind port for telemetry socket. Can be overridden at compile time. */
+#ifndef TELEMETRY_LOCAL_PORT
+#define TELEMETRY_LOCAL_PORT 5614
+#endif
+
+static void telemetry_handle_packet(const uint8_t *buf, ssize_t len, const struct sockaddr_in *src)
+{
+    if (!buf || len <= 0) return;
+    // Simple demo: print packet info and type if present
+    char addrbuf[INET_ADDRSTRLEN] = {0};
+    inet_ntop(AF_INET, &src->sin_addr, addrbuf, sizeof(addrbuf));
+    uint16_t port = ntohs(src->sin_port);
+    if (len >= 1) {
+        uint8_t type = buf[0];
+        printf("[TELEMETRY RX] %zd bytes from %s:%u type=0x%02X\n", len, addrbuf, port, type);
+    } else {
+        printf("[TELEMETRY RX] %zd bytes from %s:%u\n", len, addrbuf, port);
+    }
+}
+
+static int init_telemetry_socket()
+{
+    if (g_crsf_udp_bridge_sock != -1) return 0; // already initialized
+
+    g_crsf_udp_bridge_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (g_crsf_udp_bridge_sock < 0) {
+        perror("Failed to create telemetry UDP socket");
+        g_crsf_udp_bridge_sock = -1;
+        return -1;
+    }
+
+    int on = 1;
+    if (setsockopt(g_crsf_udp_bridge_sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+        perror("setsockopt SO_REUSEADDR");
+        // not fatal
+    }
+
+    struct sockaddr_in local = {0};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons(TELEMETRY_LOCAL_PORT);
+
+    if (bind(g_crsf_udp_bridge_sock, (struct sockaddr*)&local, sizeof(local)) < 0) {
+        perror("Failed to bind telemetry socket");
+        close(g_crsf_udp_bridge_sock);
+        g_crsf_udp_bridge_sock = -1;
+        return -1;
+    }
+    if (!g_crsf_udp_bridge_addr_initialized) {
+        memset(&g_crsf_udp_bridge_addr, 0, sizeof(g_crsf_udp_bridge_addr));
+        g_crsf_udp_bridge_addr.sin_family = AF_INET;
+        g_crsf_udp_bridge_addr.sin_port = htons(5613);
+        if (inet_pton(AF_INET, "127.0.0.1", &g_crsf_udp_bridge_addr.sin_addr) != 1) {
+            fprintf(stderr, "Invalid telemetry remote address\n");
+            return -1;
+        }
+        g_crsf_udp_bridge_addr_initialized = true;
+    }
+
+    printf("Telemetry socket bound to port %d\n", TELEMETRY_LOCAL_PORT);
+    return 0;
+}
+
+static void deinit_telemetry_socket(void)
+{
+    if (g_crsf_udp_bridge_sock == -1) return;
+    // Wake up recvfrom by closing socket
+    shutdown(g_crsf_udp_bridge_sock, SHUT_RDWR);
+    close(g_crsf_udp_bridge_sock);
+    g_crsf_udp_bridge_sock = -1;
+}
 
 static uint64_t get_time_ms(void)
 {
@@ -179,6 +276,61 @@ static void send_api_version_request(void)
     printf("[MSP] API Version request sent %d bytes\n", len);
 }
 
+// Send and wait for a single response up to timeout_ms milliseconds.
+// Returns number of bytes received into resp_buf, 0 for timeout, or -1 on error.
+ssize_t send_and_wait_response(const void *send_buf, size_t send_len,
+                               void *resp_buf, size_t resp_maxlen, int timeout_ms)
+{
+    if (g_crsf_udp_bridge_sock == -1) {
+        if (init_telemetry_socket(false) != 0) return -1;
+    }
+    if (!g_crsf_udp_bridge_addr_initialized) {
+        memset(&g_crsf_udp_bridge_addr, 0, sizeof(g_crsf_udp_bridge_addr));
+        g_crsf_udp_bridge_addr.sin_family = AF_INET;
+        g_crsf_udp_bridge_addr.sin_port = htons(5613);
+        if (inet_pton(AF_INET, "127.0.0.1", &g_crsf_udp_bridge_addr.sin_addr) != 1) {
+            fprintf(stderr, "Invalid telemetry remote address\n");
+            return -1;
+        }
+        g_crsf_udp_bridge_addr_initialized = true;
+    }
+
+    ssize_t sent = sendto(g_crsf_udp_bridge_sock, send_buf, send_len, 0,
+                          (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
+    if (sent < 0) {
+        perror("sendto telemetry");
+        return -1;
+    }
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(g_crsf_udp_bridge_sock, &rfds);
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int sel = select(g_crsf_udp_bridge_sock + 1, &rfds, NULL, NULL, &tv);
+    if (sel > 0 && FD_ISSET(g_crsf_udp_bridge_sock, &rfds)) {
+        struct sockaddr_in src;
+        socklen_t slen = sizeof(src);
+        ssize_t n = recvfrom(g_crsf_udp_bridge_sock, resp_buf, resp_maxlen, 0,
+                             (struct sockaddr*)&src, &slen);
+        if (n > 0) {
+            return n;
+        }
+        if (n == -1 && errno != EINTR) {
+            perror("recvfrom (send_and_wait_response)");
+            return -1;
+        }
+        return 0;
+    } else if (sel == 0) {
+        // timeout
+        return 0;
+    } else {
+        if (sel == -1 && errno != EINTR) perror("select");
+        return -1;
+    }
+}
 static void send_variant_request(void)
 {
     uint8_t buffer[256] = {0};
@@ -528,6 +680,10 @@ int connect_to_fc(const char *device, int baudrate)
     last_aggregation_update = 0;
 
     // Start threads
+    // Initialize telemetry socket (bind once for life of program)
+    if (init_telemetry_socket() != 0) {
+        fprintf(stderr, "Warning: telemetry socket init failed, continuing without telemetry RX\n");
+    }
     if (pthread_create(&fc_read_thread, NULL, fc_read_thread_fn, NULL) != 0) {
         fprintf(stderr, "Failed to create FC read thread\n");
         return -1;
@@ -562,6 +718,9 @@ void disconnect_from_fc(void)
     aggregation_buffer[0].size = aggregation_buffer[1].size = 0;
     aggregation_buffer[0].cap = aggregation_buffer[1].cap = 0;
     pthread_mutex_unlock(&aggr_mutex);
+
+    // Deinit telemetry socket and receiver
+    deinit_telemetry_socket();
 
     fprintf(stderr, "Disconnected from flight controller\n");
 }
@@ -629,28 +788,86 @@ void update_telemetry_stats(uint8_t uplink_rssi_1, uint8_t uplink_rssi_2,
 // Send telemetry to flight controller via UDP
 void send_telemetry_to_fc(void)
 {
-    static int udp_socket = -1;
-    static struct sockaddr_in fc_addr;
-    static bool addr_initialized = false;
-    
-    // Initialize socket and address on first call
-    if (udp_socket == -1) {
-        udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
-        if (udp_socket < 0) {
-            perror("Failed to create UDP socket for FC telemetry");
-            return;
-        }
+    if (g_crsf_udp_bridge_sock == -1) {
+        printf("CRSF UDP bridge socket not initialized, cannot send telemetry\n");
+        return;
     }
-    
-    if (!addr_initialized) {
-        memset(&fc_addr, 0, sizeof(fc_addr));
-        fc_addr.sin_family = AF_INET;
-        fc_addr.sin_port = htons(5613);
-        inet_pton(AF_INET, "127.0.0.1", &fc_addr.sin_addr);
-        addr_initialized = true;
+
+    uint8_t buf[1 + sizeof(link_stats)];
+    buf[0] = CRSF_TYPE_LINK_STATISTICS;
+    memcpy(&buf[1], &link_stats, sizeof(link_stats));
+    ssize_t n = sendto(g_crsf_udp_bridge_sock, buf, (size_t)(1 + sizeof(link_stats)), 0,
+                       (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
+    if (n < 0) {
+        perror("sendto telemetry");
     }
+}
+
+void send_rc_override_to_fc(uint16_t* buf, size_t channel_count)
+{
+    if (g_crsf_udp_bridge_sock == -1) {
+        printf("CRSF UDP bridge socket not initialized, cannot send RC override\n");
+        return;
+    }
+
+    uint8_t payload[1 + channel_count * sizeof(buf[0])];
+    payload[0] = CRSF_TYPE_RC_CHANNELS;
+    memcpy(&payload[1], buf, channel_count * sizeof(buf[0]));
+    ssize_t n = sendto(g_crsf_udp_bridge_sock, payload, (size_t)(1 + channel_count * sizeof(buf[0])), 0,
+                       (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
+    printf("Sent RC override to FC\n");
+    if (n < 0) {
+        perror("sendto rc override");
+    }
+}
+
+void enable_rc_override_on_fc(const uint8_t *channels, size_t channel_count)
+{
+    if (g_crsf_udp_bridge_sock == -1) {
+        printf("CRSF UDP bridge socket not initialized, cannot send enable RC override\n");
+        return;
+    }
+
+    uint8_t payload[1 + channel_count * sizeof(channels[0])];
+    payload[0] = CRSF_TYPE_ENABLE_OVERRIDE;
+    memcpy(&payload[1], channels, channel_count * sizeof(channels[0])); // 1 = enable/disable byte
+    ssize_t n = sendto(g_crsf_udp_bridge_sock, payload, sizeof(payload), 0,
+                       (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
+    printf("Sent enable RC override to FC\n");
+    if (n < 0) {
+        perror("sendto enable rc override");
+    }
+}
+
+int request_last_original_rc_from_fc(uint16_t* out_buf, size_t channel_count)
+{
+    if (g_crsf_udp_bridge_sock == -1) {
+        printf("CRSF UDP bridge socket not initialized, cannot request last original RC\n");
+        return -1;
+    }
+
+    uint8_t payload[sizeof(uint16_t) * CRSF_RC_CHANNELS_COUNT + 1];
+    payload[0] = CRSF_TYPE_LAST_ORIGINAL_RC;
+
+    ssize_t rsize = send_and_wait_response(payload, sizeof(uint8_t), payload, sizeof(payload), 1000);
+    if (rsize == sizeof(payload)) {
+        // Successfully received last original RC channels
+        printf("Received last original RC channels from FC:\n");
+        memcpy(out_buf, &payload[1], channel_count * sizeof(uint16_t));
+        return 0;
+    } else if (rsize == 0) {
+        printf("Timeout waiting for last original RC channels from FC\n");
+        return -1;
+    } else {
+        printf("Error receiving last original RC channels from FC\n");
+        return -1;
+    }
+}
+
+void register_fc_property_update_callback(fc_property_update_callback_t callback, uint32_t frequency_hz)
+{
+    fc_property_update_cb = callback;
+    fc_property_update_frequency_hz = frequency_hz;
     
-    // Send the telemetry structure
-    sendto(udp_socket, &link_stats, sizeof(link_stats), 0,
-           (struct sockaddr*)&fc_addr, sizeof(fc_addr));
+
 }

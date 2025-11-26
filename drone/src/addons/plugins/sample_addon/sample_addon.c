@@ -40,6 +40,7 @@ static void demo_fc_api(const subsystem_context_t *ctx)
     static uint16_t base = 1500;
     const size_t channel_count = 8;
     uint16_t demo_channels[channel_count];
+    uint8_t channels_map[] = {1, 1, 1, 1, 0, 0, 0, 0};
     for (size_t i = 0; i < channel_count; ++i) {
         int16_t offset = (int16_t)(i * 25);
         int value = (int)base + direction * offset;
@@ -61,7 +62,7 @@ static void demo_fc_api(const subsystem_context_t *ctx)
     }
 
     if (api->fc.enable_rc_override) {
-        int rc = api->fc.enable_rc_override(demo_channels, channel_count);
+        int rc = api->fc.enable_rc_override(channels_map, channel_count);
         subsystem_log(ctx, rc == 0 ? SUBSYS_LOG_INFO : SUBSYS_LOG_WARN,
                   "sample_addon",
                   rc == 0 ? "RC override enabled" : "RC override failed");
@@ -173,6 +174,8 @@ static void *sample_addon_thread(void *arg)
     if (!ctx || !api) {
         return NULL;
     }
+    subsystem_log(ctx, SUBSYS_LOG_INFO, "sample_addon",
+              "Background thread started");
 
     if (api->video.start_receiving_stream) {
         started = (api->video.start_receiving_stream(1280, 720) == 0);
@@ -203,10 +206,7 @@ static int sample_addon_init(const subsystem_context_t *ctx)
              ctx->conf_file_path ? ctx->conf_file_path : "<none>",
              tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
 
-    subsystem_log(ctx, SUBSYS_LOG_INFO, "sample_addon", message);
-    demo_fc_api(ctx);
-    demo_overlay_api(ctx);
-    demo_video_api(ctx);
+    subsystem_log(ctx, SUBSYS_LOG_INFO, "sample_addon started", message);
 
     g_ctx = ctx;
     g_thread_should_run = true;
