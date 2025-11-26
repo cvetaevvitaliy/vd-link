@@ -22,6 +22,7 @@ void overlay_draw_crosshair(int x, int y, int size,
                             uint32_t argb_color, int thickness);
 void overlay_draw_text(int x, int y, const char *text,
                        uint32_t argb_color, int size);
+void overlay_measure_text(const char *text, int size, int *width, int *height);
 void overlay_draw_line(int x1, int y1, int x2, int y2,
                        uint32_t argb_color, int thickness);
 int  overlay_push_to_encoder(void);

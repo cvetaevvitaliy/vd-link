@@ -77,13 +77,11 @@ static int host_overlay_init_stub(void)
 
 static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, uint8_t alpha, int size)
 {
-    (void)point.x;
-    (void)point.y;
-    (void)text;
-    (void)color;
-    (void)size;
-    INFO("overlay_draw_text() is not wired yet");
-    return -ENOTSUP;
+    int x = (int)(point.x * overlay_width);;
+    int y = (int)(point.y * overlay_height);;
+    uint32_t color_value = color_to_argb(color, alpha);
+    overlay_draw_text(x, y, text, color_value, size);
+    return 0;
 }
 
 static int host_overlay_draw_rectangle_stub(subsystem_overlay_point_norm_t left_top, subsystem_overlay_point_norm_t right_bottom, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
