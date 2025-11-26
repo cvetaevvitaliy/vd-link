@@ -2,22 +2,22 @@
 #include <errno.h>
 #include "log.h"
 
+#include "fc_conn.h"
+
 static const char* module_name_str = "subsystem_api";
 
-static int host_enable_rc_override_stub(const uint16_t *channels, size_t channel_count)
+static int host_enable_rc_override_stub(const uint8_t *channels, size_t channel_count)
 {
 	(void)channels;
 	(void)channel_count;
-	INFO("enable_rc_override() is not wired yet");
-	return -ENOTSUP;
+	enable_rc_override_on_fc(channels, channel_count);
+	return 0;
 }
 
 static int host_send_rc_buf_override_stub(const uint16_t *channels, size_t channel_count)
 {
-    (void)channels;
-    (void)channel_count;
-    INFO("send_rc_buf_override() is not wired yet");
-    return -ENOTSUP;
+    send_rc_override_to_fc((uint16_t*)channels, channel_count);
+    return 0;
 }
 
 static int host_send_rc_override_stub(uint16_t throttle, uint16_t yaw, uint16_t pitch, uint16_t roll, uint16_t aux1, uint16_t aux2, uint16_t aux3, uint16_t aux4)
@@ -102,7 +102,7 @@ static int host_video_stop_receiving_stream_stub(void)
     return -ENOTSUP;
 }
 
-static int host_video_get_stream_frame_stub(uint8_t* frame_data, size_t frame_size, uint64_t timestamp_ms)
+static int host_video_get_stream_frame_stub(uint8_t* frame_data, size_t* frame_size, uint64_t* timestamp_ms)
 {
     (void)frame_data;
     (void)frame_size;

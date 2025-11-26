@@ -163,8 +163,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[ MAIN ] Warning: plugin manager disabled due to init failure\n");
     }
 
-    return 0;
-
     printf("Configuration:\n");
     printf("RTP Streamer:\n");
     printf(" ip: %s\n", config.rtp_streamer_config.ip);

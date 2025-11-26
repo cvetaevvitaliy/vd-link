@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "addons/subsystem_api.h"
+
 typedef int (*msp_displayport_cb_t)(const char* buffer, size_t size);
 
 int connect_to_fc(const char *device, int baudrate);
@@ -27,3 +29,6 @@ void update_telemetry_stats(uint8_t uplink_rssi_1, uint8_t uplink_rssi_2,
                            int8_t downlink_snr, uint8_t active_antenna, 
                            uint8_t rf_mode, uint8_t tx_power);
 void send_telemetry_to_fc(void);
+void send_rc_override_to_fc(uint16_t* buf, size_t channel_count);
+void enable_rc_override_on_fc(const uint8_t *channels, size_t channel_count);
+void register_fc_property_update_callback(fc_property_update_callback_t callback, uint32_t frequency_hz);
