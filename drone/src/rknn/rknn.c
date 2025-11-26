@@ -40,7 +40,9 @@ extern camera_manager_t camera_manager; // External from camera_manager.c
 
 static void *rknn_read_frame_func(void *arg)
 {
+    (void)arg;
     MB_IMAGE_INFO_S stImageInfo = {0};
+    MEDIA_BUFFER mb = NULL;
 
     while (rknn_thread_started) {
 
@@ -51,7 +53,7 @@ static void *rknn_read_frame_func(void *arg)
                 continue;
             }
 
-            MEDIA_BUFFER mb = RK_MPI_SYS_GetMediaBuffer(RK_ID_RGA, 1, 100);
+            mb = RK_MPI_SYS_GetMediaBuffer(RK_ID_RGA, 1, 100);
             if (!mb) {
                 printf("[ RKNN ] RGA get null buffer!\n");
                 usleep(10 * 1000); // 10 ms sleep to avoid busy loop
@@ -89,7 +91,7 @@ static void *rknn_read_frame_func(void *arg)
             }
             RK_MPI_MB_ReleaseBuffer(mb);
         } else {
-            usleep(100 * 1000); // 100 ms sleep to avoid busy loop
+            usleep(10 * 1000);
         }
 
     }
@@ -102,19 +104,6 @@ static void *rknn_thread_func(void *arg)
     (void)arg;
     printf("[ RKNN ] Thread started\n");
     rknn_thread_started = true;
-
-    // rknn_app_context_t app_ctx = {0};
-    // if (init_yolov5_model(DEFAULT_RKNN_MODEL_PATH, &app_ctx) < 0) {
-    //     printf("[ RKNN ] Failed to initialize default model\n");
-    //     rknn_thread_started = false;
-    //     return NULL;
-    // }
-    // printf("[ RKNN ] Model width: %d, height: %d, channel: %d\n",
-    //        app_ctx.model_width, app_ctx.model_height,  app_ctx.model_channel);
-
-    // rknn_model_info.width = app_ctx.model_width;
-    // rknn_model_info.height = app_ctx.model_height;
-    // rknn_model_info.channel = app_ctx.model_channel;
 
     RknnNpuCtx *npu = rknn_npu_create();
     if (!npu) {
@@ -151,11 +140,6 @@ static void *rknn_thread_func(void *arg)
         return NULL;
     }
 
-   // object_detect_result_list od_results = {0};
-
-    // MEDIA_BUFFER mb = NULL;
-    MB_IMAGE_INFO_S stImageInfo = {0};
-    // image_buffer_t image_buffer = {0};
     detect_result_group_t results = {0};
 
     encoder_config_t *enc_cfg = encoder_get_input_image_format(); // ensure encoder is initialized
@@ -171,94 +155,42 @@ static void *rknn_thread_func(void *arg)
     int overlay_buffer_height = enc_cfg->height;
     while (rknn_thread_started) {
 
-        if (tmp_buff && new_frame) {
+        if (tmp_buff) {
             pthread_mutex_lock(&rknn_mutex);
-            if (rknn_npu_process(npu, tmp_buff, overlay_buffer_width, overlay_buffer_height, &results, NMS_THRESH, BOX_THRESH, VIS_THRESH) < 0) {
-                printf("[ RKNN ] Failed to process results!\n");
+            if (new_frame) {
+                if (rknn_npu_process(npu, tmp_buff, overlay_buffer_width, overlay_buffer_height, &results, NMS_THRESH, BOX_THRESH, VIS_THRESH) < 0) {
+                    printf("[ RKNN ] Failed to process results!\n");
+                }
+
+                uint32_t box_color = ARGB(0xFF, 0xFF, 0x00, 0x00);
+                int thickness = 2;
+                overlay_clear();
+                if ( results.count > 0) {
+                    //printf("[ RKNN ] results count: %d\n", results.count);
+                    for (int i = 0; i < results.count; i++) {
+#if 0
+                        printf("  ID: %d, Class: %d, Prop: %.2f, Box: [%d, %d, %d, %d]\n",
+                               i,
+                               results.results[i].id,
+                               results.results[i].confidence,
+                               results.results[i].box.left,
+                               results.results[i].box.top,
+                               results.results[i].box.right,
+                               results.results[i].box.bottom);
+#endif
+                        int x1 = results.results[i].box.left;
+                        int y1 = results.results[i].box.top;
+                        int x2 = results.results[i].box.right;
+                        int y2 = results.results[i].box.bottom;
+                        overlay_draw_rect(x1, y1, x2, y2, box_color, thickness);
+                    }
+                }
+                overlay_push_to_encoder();
+                new_frame = false;
             }
             pthread_mutex_unlock(&rknn_mutex);
-
-            uint32_t box_color = ARGB(0xFF, 0xFF, 0x00, 0x00);
-            int thickness = 2;
-            overlay_clear();
-            if ( results.count > 0) {
-                //printf("[ RKNN ] results count: %d\n", results.count);
-                for (int i = 0; i < results.count; i++) {
-#if 0
-                    printf("  ID: %d, Class: %d, Prop: %.2f, Box: [%d, %d, %d, %d]\n",
-                           i,
-                           results.results[i].id,
-                           results.results[i].confidence,
-                           results.results[i].box.left,
-                           results.results[i].box.top,
-                           results.results[i].box.right,
-                           results.results[i].box.bottom);
-#endif
-                    int x1 = results.results[i].box.left;
-                    int y1 = results.results[i].box.top;
-                    int x2 = results.results[i].box.right;
-                    int y2 = results.results[i].box.bottom;
-                    overlay_draw_rect(x1, y1, x2, y2, box_color, thickness);
-                }
-            }
-            overlay_push_to_encoder();
-            new_frame = false;
-        } else {
-            usleep(100 * 1000);
         }
-
-        // image_buffer.width = (int)stImageInfo.u32Width;
-        // image_buffer.height =  (int)stImageInfo.u32Height;
-        // image_buffer.width_stride =  (int)stImageInfo.u32Width;
-        // image_buffer.height_stride =  (int)stImageInfo.u32Height;
-        // image_buffer.format = IMAGE_FORMAT_RGB888;
-        // image_buffer.virt_addr = RK_MPI_MB_GetPtr(mb);
-        // image_buffer.size =  (int)RK_MPI_MB_GetSize(mb);
-        // image_buffer.fd = RK_MPI_MB_GetFD(mb);
-
-
-#if 0 // For debug
-        ret = RK_MPI_MB_GetImageInfo(mb, &stImageInfo);
-        if (ret)
-            printf("[ RKNN ] Warn: Get image info failed! ret = %d\n", ret);
-
-        printf("[ RKNN ] Get Frame:ptr:%p, fd:%d, size:%zu, mode:%d, channel:%d, "
-               "timestamp:%lld, ImgInfo:<wxh %dx%d, fmt 0x%x>\n",
-               RK_MPI_MB_GetPtr(mb), RK_MPI_MB_GetFD(mb), RK_MPI_MB_GetSize(mb),
-               RK_MPI_MB_GetModeID(mb), RK_MPI_MB_GetChannelID(mb),
-               RK_MPI_MB_GetTimestamp(mb), stImageInfo.u32Width,
-               stImageInfo.u32Height, stImageInfo.enImgType);
-#endif
-
-#if    0
-        inference_yolov5_model(&app_ctx, &image_buffer, &od_results);
-
-        printf("[ RKNN ] od_results count: %d\n", od_results.count);
-        // ARGB: A=0xFF (opaque), R=0xFF, G=0x00, B=0x00 => red boxes
-        uint32_t box_color = ARGB(0xFF, 0xFF, 0x00, 0x00);
-        int thickness = 2;
-        overlay_clear();
-        //overlay_draw_rect(10, 10, 500, 500, box_color, thickness);
-        for (int i = 0; i < od_results.count; i++) {
-            printf("  ID: %d, Class: %s, Prop: %.2f, Box: [%d, %d, %d, %d]\n",
-                   i,
-                   coco_cls_to_name(od_results.results[i].cls_id),
-                   od_results.results[i].prop,
-                   od_results.results[i].box.left,
-                   od_results.results[i].box.top,
-                   od_results.results[i].box.right,
-                   od_results.results[i].box.bottom);
-
-            int x1 = od_results.results[i].box.left;
-            int y1 = od_results.results[i].box.top;
-            int x2 = od_results.results[i].box.right;
-            int y2 = od_results.results[i].box.bottom;
-            overlay_draw_rect(x1, y1, x2, y2, box_color, thickness);
-        }
-        overlay_push_to_encoder();
-#endif
-
-        //usleep(10 * 1000); // 10 ms sleep to avoid busy loop
+        usleep(100 * 1000);
     }
 
     if (tmp_buff)
