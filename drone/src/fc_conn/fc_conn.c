@@ -337,7 +337,7 @@ static void send_variant_request(void)
     uint8_t buffer[256] = {0};
     int len = construct_msp_command_v1(buffer, MSP_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
     if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
-    printf("[MSP] FC Variant request sent %d bytes\n", len);
+    //printf("[MSP] FC Variant request sent %d bytes\n", len);
 }
 
 static void send_fc_version_request(void)
@@ -459,7 +459,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         fc_properties.fc_variant[sizeof(fc_properties.fc_variant) - 1] = '\0';
         fc_properties.fc_variant_ready = true;
 
-        printf("[MSP] FC Variant received: %s\n", fc_properties.fc_variant);
+        //printf("[MSP] FC Variant received: %s\n", fc_properties.fc_variant);
     }
 
     else if (msp_cmd == MSP_FC_VERSION) {
@@ -595,7 +595,7 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         {
             char variant_str[257] = {0};
             memcpy(variant_str, payload, data_size < 256 ? data_size : 256);
-            printf("[MSP] FC Variant received: %s\n", variant_str);
+            //printf("[MSP] FC Variant received: %s\n", variant_str);
             break;
         }
     default:
@@ -778,6 +778,7 @@ int connect_to_fc(const char *device, int baudrate)
 
 void disconnect_from_fc(void)
 {
+    if (!run) return;
     run = false;
 
     // Join threads

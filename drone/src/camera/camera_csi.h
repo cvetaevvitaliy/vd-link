@@ -9,7 +9,9 @@
 
 int camera_csi_init(camera_csi_config_t *cfg);
 int camera_csi_bind_encoder(int cam_id, int enc_id);
+int camera_csi_bind_rknn(int cam_id, int cam_ch, int rga_ch, int rknn_width, int rknn_height);
 int camera_csi_unbind_encoder(int cam_id, int enc_id);
+int camera_csi_unbind_rknn(int cam_id, int ch_id, int rga_id, int rga_ch);
 int camera_csi_deinit(camera_csi_config_t *cfg);
 
 int camera_csi_set_hdr_mode(int cam_id, bool enable);
