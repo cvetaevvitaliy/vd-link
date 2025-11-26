@@ -47,7 +47,7 @@ typedef struct {
 	} attitude;
 	float altitude_m;
 	uint16_t rc_channels[16];
-} fc_properties_t;
+} subsystem_fc_properties_t;
 
 
 typedef void (*subsystem_log_fn)(subsystem_log_severity_t severity,
@@ -56,10 +56,10 @@ typedef void (*subsystem_log_fn)(subsystem_log_severity_t severity,
 	void *user_data);
 
 /* Callback prototype for flight controller property updates;
-	@param properties Pointer to fc_properties_t structure with updated values
+	@param properties Pointer to subsystem_fc_properties_t structure with updated values
 	@param timestamp_ms Pointer to variable to receive timestamp in milliseconds
 */
-typedef void (*fc_property_update_callback_t)(const fc_properties_t *properties, uint64_t* timestamp_ms);
+typedef void (*fc_property_update_callback_t)(const subsystem_fc_properties_t *properties, uint64_t* timestamp_ms);
 	
 typedef int (*subsystem_enable_rc_override_fn)(const uint8_t *channels,
 												 size_t channel_count);

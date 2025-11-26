@@ -78,11 +78,12 @@ static fc_properties_t fc_properties = {0};
 
 static pthread_t fc_read_thread;
 static pthread_t fc_write_thread;
+static pthread_t fc_property_update_thread;
 static pthread_mutex_t aggr_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static fc_property_update_callback_t fc_property_update_cb = NULL;
 static uint32_t fc_property_update_frequency_hz = 0;
-static fc_properties_t last_fc_properties = {0};
+static subsystem_fc_properties_t last_fc_properties = {0};
 static pthread_mutex_t fc_properties_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static aggregated_buffer_t aggregation_buffer[2] = {{NULL, 0, 0}, {NULL, 0, 0}};
@@ -388,6 +389,22 @@ static void send_displayport_heartbeat(void)
     // printf("[MSP] DisplayPort Keepalive sent\n");
 }
 
+static void send_attitude_request(void)
+{
+    uint8_t buffer[256] = {0};
+    int len = construct_msp_command_v1(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
+    // printf("[MSP] Attitude request sent %d bytes\n", len);
+}
+
+static void send_altitude_request(void)
+{
+    uint8_t buffer[256] = {0};
+    int len = construct_msp_command_v1(buffer, MSP_ALTITUDE, NULL, 0, MSP_OUTBOUND);
+    if (len > 0) (void)msp_interface_write(&msp_interface, buffer, (size_t)len);
+    // printf("[MSP] Altitude request sent %d bytes\n", len);
+}
+
 void msp_send_update_rssi(int rssi)
 {
     send_fc_tx_info((uint8_t)rssi);
@@ -485,6 +502,29 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
         }
     }
 
+    else if (msp_cmd == MSP_ATTITUDE) {
+        if (data_size >= 6) {
+            int16_t roll = (int16_t)(payload[0] | (payload[1] << 8));
+            int16_t pitch = (int16_t)(payload[2] | (payload[3] << 8));
+            int16_t yaw = (int16_t)(payload[4] | (payload[5] << 8));
+
+            pthread_mutex_lock(&fc_properties_mutex);
+            last_fc_properties.attitude.roll = roll / 10.0f;
+            last_fc_properties.attitude.pitch = pitch / 10.0f;
+            last_fc_properties.attitude.yaw = yaw * 1.0f;
+            pthread_mutex_unlock(&fc_properties_mutex);
+        }
+    }
+
+    else if (msp_cmd == MSP_ALTITUDE) {
+        if (data_size >= 4) {
+            int32_t altitude = (int32_t)(payload[0] | (payload[1] << 8) | (payload[2] << 16) | (payload[3] << 24));
+            pthread_mutex_lock(&fc_properties_mutex);
+            last_fc_properties.altitude_m = altitude / 100.0f; // in meters
+            pthread_mutex_unlock(&fc_properties_mutex);
+        }
+    }
+
     // Filter only desired MSP commands; extend if needed
     else if (msp_cmd == MSP_DISPLAYPORT) {
         msp_displayport_cmd_e sub_cmd = payload[0];
@@ -563,18 +603,52 @@ static void rx_msp_callback(uint8_t owner, msp_version_t msp_version, uint16_t m
     }
 }
 
+static void* fc_property_update_thread_fn(void *arg)
+{
+    (void)arg;
+
+    while (run) {
+        if (fc_property_update_cb && fc_property_update_frequency_hz > 0) {
+            // Calculate sleep time based on frequency
+            uint64_t sleep_ms = 1000 / fc_property_update_frequency_hz;
+            
+            send_attitude_request();
+            send_altitude_request();
+            
+            uint16_t buffer[CRSF_RC_CHANNELS_COUNT] = {0};
+            request_last_original_rc_from_fc(buffer, sizeof(buffer) / sizeof(buffer[0]));
+            
+            pthread_mutex_lock(&fc_properties_mutex);
+            memcpy(last_fc_properties.rc_channels, buffer, sizeof(buffer));
+            pthread_mutex_unlock(&fc_properties_mutex);
+            
+            // Call the callback if properties changed or based on frequency
+            if (fc_property_update_frequency_hz > 0) {
+                pthread_mutex_lock(&fc_properties_mutex);
+                uint64_t timestamp = get_time_ms();
+                fc_property_update_cb(&last_fc_properties, &timestamp);
+                pthread_mutex_unlock(&fc_properties_mutex);
+            }
+            
+            // Sleep for the calculated time
+            usleep(sleep_ms * 1000);
+        } else {
+            // If no callback or frequency is 0, sleep for 1 second
+            sleep(1);
+        }
+    }
+
+    return NULL;
+}
+
 static void* fc_write_thread_fn(void *arg)
 {
     (void)arg;
 
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = THREAD_MSP_WRITE_SLEEP_MSEC * 1000000L;
-
     while (run) {
         /* Periodically request FC variant */
         send_variant_request();
-        nanosleep(&ts, NULL);
+        usleep(THREAD_MSP_WRITE_SLEEP_MSEC * 1000);
     }
 
     return NULL;
@@ -588,8 +662,6 @@ static void* fc_read_thread_fn(void *arg)
         fprintf(stderr, "Error init MSP interface\n");
         return NULL;
     }
-
-    run = true;
 
     // Allocate double buffers
     aggregation_buffer[0].cap = aggregation_mtu;
@@ -678,6 +750,8 @@ int connect_to_fc(const char *device, int baudrate)
     current_aggregation_buffer = 0;
     fc_ready = false;
     last_aggregation_update = 0;
+    
+    run = true;
 
     // Start threads
     // Initialize telemetry socket (bind once for life of program)
@@ -694,6 +768,11 @@ int connect_to_fc(const char *device, int baudrate)
         return -1;
     }
 
+    if (pthread_create(&fc_property_update_thread, NULL, fc_property_update_thread_fn, NULL) != 0) {
+        fprintf(stderr, "Failed to create FC property update thread\n");
+        return -1;
+    }
+
     return 0;
 }
 
@@ -704,6 +783,7 @@ void disconnect_from_fc(void)
     // Join threads
     pthread_join(fc_write_thread, NULL);
     pthread_join(fc_read_thread, NULL);
+    pthread_join(fc_property_update_thread, NULL);
 
     // Free buffers & snapshots
     pthread_mutex_lock(&aggr_mutex);
@@ -815,7 +895,6 @@ void send_rc_override_to_fc(uint16_t* buf, size_t channel_count)
     memcpy(&payload[1], buf, channel_count * sizeof(buf[0]));
     ssize_t n = sendto(g_crsf_udp_bridge_sock, payload, (size_t)(1 + channel_count * sizeof(buf[0])), 0,
                        (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
-    printf("Sent RC override to FC\n");
     if (n < 0) {
         perror("sendto rc override");
     }
@@ -833,7 +912,6 @@ void enable_rc_override_on_fc(const uint8_t *channels, size_t channel_count)
     memcpy(&payload[1], channels, channel_count * sizeof(channels[0])); // 1 = enable/disable byte
     ssize_t n = sendto(g_crsf_udp_bridge_sock, payload, sizeof(payload), 0,
                        (struct sockaddr*)&g_crsf_udp_bridge_addr, sizeof(g_crsf_udp_bridge_addr));
-    printf("Sent enable RC override to FC\n");
     if (n < 0) {
         perror("sendto enable rc override");
     }
@@ -866,8 +944,12 @@ int request_last_original_rc_from_fc(uint16_t* out_buf, size_t channel_count)
 
 void register_fc_property_update_callback(fc_property_update_callback_t callback, uint32_t frequency_hz)
 {
+    pthread_mutex_lock(&fc_properties_mutex);
     fc_property_update_cb = callback;
     fc_property_update_frequency_hz = frequency_hz;
     
-
+    // Initialize last_fc_properties to current state
+    memcpy(&last_fc_properties, &fc_properties, sizeof(subsystem_fc_properties_t));
+    pthread_mutex_unlock(&fc_properties_mutex);
+    printf("[FC PROP UPDATE] Callback registered with frequency %u Hz\n", frequency_hz);
 }
