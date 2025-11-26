@@ -36,10 +36,8 @@ static int host_send_rc_override_stub(uint16_t throttle, uint16_t yaw, uint16_t 
 
 static int host_register_fc_property_update_callback_stub(fc_property_update_callback_t callback, uint32_t frequency_hz)
 {
-    (void)callback;
-    (void)frequency_hz;
-    INFO("register_fc_property_update_callback() is not wired yet");
-    return -ENOTSUP;
+    register_fc_property_update_callback(callback, frequency_hz);
+    return 0;
 }
 
 static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, int size)

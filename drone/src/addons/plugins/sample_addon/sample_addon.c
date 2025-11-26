@@ -13,7 +13,7 @@ static pthread_t g_worker_thread;
 static volatile bool g_thread_should_run = false;
 static bool g_worker_started = false;
 
-static void fc_properties_callback(const fc_properties_t *properties, uint64_t *timestamp_ms)
+static void fc_properties_callback(const subsystem_fc_properties_t *properties, uint64_t *timestamp_ms)
 {
     (void)timestamp_ms;
     if (!properties) {
@@ -25,6 +25,11 @@ static void fc_properties_callback(const fc_properties_t *properties, uint64_t *
         properties->attitude.pitch,
         properties->attitude.yaw,
         properties->altitude_m);
+    printf("[sample_addon] fc callback: RC channels:");
+    for (size_t i = 0; i < 8; ++i) {
+        printf(" %u", properties->rc_channels[i]);
+    }
+    printf("\n");
 }
 
 static void demo_fc_api(const subsystem_context_t *ctx)
@@ -87,14 +92,6 @@ static void demo_fc_api(const subsystem_context_t *ctx)
                   "sample_addon",
                   rc == 0 ? "RC override (individual) sent" :
                   "RC override (individual) failed");
-    }
-
-    if (api->fc.register_fc_property_update_callback) {
-        int rc = api->fc.register_fc_property_update_callback(fc_properties_callback, 5u);
-        subsystem_log(ctx, rc == 0 ? SUBSYS_LOG_INFO : SUBSYS_LOG_WARN,
-                  "sample_addon",
-                  rc == 0 ? "FC property callback registered" :
-                  "FC property callback registration failed");
     }
 }
 
@@ -181,16 +178,27 @@ static void *sample_addon_thread(void *arg)
         started = (api->video.start_receiving_stream(1280, 720) == 0);
     }
 
+    if (api->fc.register_fc_property_update_callback) {
+        api->fc.register_fc_property_update_callback(fc_properties_callback, 1);
+    } else {
+        subsystem_log(ctx, SUBSYS_LOG_WARN, "sample_addon",
+                  "FC property update callback registration not supported");
+    }
+
     while (g_thread_should_run) {
         demo_fc_api(ctx);
-        demo_overlay_api(ctx);
-        demo_video_api(ctx);
+        // demo_overlay_api(ctx);
+        // demo_video_api(ctx);
 
         sleep(1);
     }
 
     if (started && api->video.stop_receiving_stream) {
-        api->video.stop_receiving_stream();
+        int rc = api->video.stop_receiving_stream();
+        subsystem_log(ctx, rc == 0 ? SUBSYS_LOG_INFO : SUBSYS_LOG_WARN,
+                "sample_addon",
+                rc == 0 ? "FC property callback registered" :
+                "FC property callback registration failed");
     }
     return NULL;
 }

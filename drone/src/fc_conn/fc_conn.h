@@ -32,3 +32,4 @@ void send_telemetry_to_fc(void);
 void send_rc_override_to_fc(uint16_t* buf, size_t channel_count);
 void enable_rc_override_on_fc(const uint8_t *channels, size_t channel_count);
 void register_fc_property_update_callback(fc_property_update_callback_t callback, uint32_t frequency_hz);
+int request_last_original_rc_from_fc(uint16_t* out_buf, size_t channel_count);
