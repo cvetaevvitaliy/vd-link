@@ -86,6 +86,37 @@ static inline void overlay_set_pixel(int x, int y, uint32_t argb)
     *ptr = argb;
 }
 
+void overlay_draw_line(int x1, int y1, int x2, int y2,
+                       uint32_t argb_color, int thickness)
+{
+    /* Bresenham's line algorithm with thickness */
+    int dx = abs(x2 - x1);
+    int dy = abs(y2 - y1);
+    int sx = (x1 < x2) ? 1 : -1;
+    int sy = (y1 < y2) ? 1 : -1;
+    int err = dx - dy;
+
+    while (1) {
+        // Draw pixel with thickness
+        for (int tx = -thickness / 2; tx <= thickness / 2; ++tx) {
+            for (int ty = -thickness / 2; ty <= thickness / 2; ++ty) {
+                overlay_set_pixel(x1 + tx, y1 + ty, argb_color);
+            }
+        }
+
+        if (x1 == x2 && y1 == y2) break;
+        int err2 = err * 2;
+        if (err2 > -dy) {
+            err -= dy;
+            x1 += sx;
+        }
+        if (err2 < dx) {
+            err += dx;
+            y1 += sy;
+        }
+    }
+}
+
 /* Draw rectangle border (axis-aligned) with given thickness (>=1) */
 void overlay_draw_rect(int x1, int y1, int x2, int y2,
                        uint32_t argb_color, int thickness)
@@ -146,8 +177,36 @@ void overlay_draw_rect(int x1, int y1, int x2, int y2,
     }
 }
 
+void overlay_draw_crosshair(int x, int y, int size,
+                       uint32_t argb_color, int thickness)
+{
+    int half_size = size / 2;
+
+    // Diagonal lines to form an X
+    overlay_draw_line(x - half_size, y - half_size, x + half_size, y + half_size, argb_color, thickness);
+    overlay_draw_line(x - half_size, y + half_size, x + half_size, y - half_size, argb_color, thickness);
+}
+
+void overlay_draw_text(int x, int y, const char *text,
+                       uint32_t argb_color, int size)
+{
+    // Simple placeholder: draw a rectangle representing text area
+    int text_width = (int)(size * 0.6f * strlen(text)); // Approximate width
+    int text_height = size; // Approximate height
+
+    overlay_draw_rect(x, y, x + text_width, y + text_height, argb_color, 1); // replace with actual text rendering
+}
+
 /* Send current overlay buffer to encoder */
 int overlay_push_to_encoder(void)
 {
     return encoder_draw_overlay_buffer(overlay_buffer,overlay_buffer_width, overlay_buffer_height);
+}
+
+void overlay_get_overlay_size(int *width, int *height)
+{
+    if (width)
+        *width = overlay_buffer_width;
+    if (height)
+        *height = overlay_buffer_height;
 }

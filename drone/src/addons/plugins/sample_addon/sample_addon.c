@@ -112,21 +112,22 @@ static void demo_overlay_api(const subsystem_context_t *ctx)
     static uint32_t counter = 0;
     snprintf(osd_text, sizeof(osd_text), "Sample OSD Counter: %u", counter++);
 
+    if (api->overlay.clear) {
+        api->overlay.clear();
+    }
     if (api->overlay.draw_text) {
-        api->overlay.draw_text(top_left, osd_text, SUBSYS_OVERLAY_COLOR_GREEN, 2);
+        api->overlay.draw_text(top_left, osd_text, SUBSYS_OVERLAY_COLOR_GREEN,  255, 2);
     }
     if (api->overlay.draw_rectangle) {
-        api->overlay.draw_rectangle(top_left, bottom_right, SUBSYS_OVERLAY_COLOR_RED, 1);
+        api->overlay.draw_rectangle(top_left, bottom_right, SUBSYS_OVERLAY_COLOR_BLUE, 255, 10);
     }
     if (api->overlay.draw_crosshair) {
-        api->overlay.draw_crosshair(center, 0.1f, SUBSYS_OVERLAY_COLOR_WHITE, 1);
+        api->overlay.draw_crosshair(center, 0.1f, SUBSYS_OVERLAY_COLOR_WHITE, 255, 10);
     }
     if (api->overlay.draw_screen) {
         api->overlay.draw_screen();
     }
-    if (api->overlay.clear) {
-        api->overlay.clear();
-    }
+
 
     if (center.y > 0.9f) {
         crosshair_step = -0.1f;
@@ -174,6 +175,10 @@ static void *sample_addon_thread(void *arg)
     subsystem_log(ctx, SUBSYS_LOG_INFO, "sample_addon",
               "Background thread started");
 
+    if (api->overlay.init) {
+        api->overlay.init();
+    }
+
     if (api->video.start_receiving_stream) {
         started = (api->video.start_receiving_stream(1280, 720) == 0);
     }
@@ -187,7 +192,7 @@ static void *sample_addon_thread(void *arg)
 
     while (g_thread_should_run) {
         demo_fc_api(ctx);
-        // demo_overlay_api(ctx);
+        demo_overlay_api(ctx);
         // demo_video_api(ctx);
 
         sleep(1);

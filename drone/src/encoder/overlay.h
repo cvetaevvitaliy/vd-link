@@ -18,7 +18,14 @@ int overlay_init(void);
 void overlay_deinit(void);
 void overlay_clear(void);
 void overlay_draw_rect(int x1, int y1, int x2, int y2, uint32_t argb_color, int thickness);
+void overlay_draw_crosshair(int x, int y, int size,
+                            uint32_t argb_color, int thickness);
+void overlay_draw_text(int x, int y, const char *text,
+                       uint32_t argb_color, int size);
+void overlay_draw_line(int x1, int y1, int x2, int y2,
+                       uint32_t argb_color, int thickness);
 int  overlay_push_to_encoder(void);
+void overlay_get_overlay_size(int *width, int *height);
 
 /* Optional: direct access to raw buffer if needed */
 uint8_t *overlay_get_buffer(void);

@@ -3,8 +3,35 @@
 #include "log.h"
 
 #include "fc_conn.h"
+#include "encoder/overlay.h"
 
 static const char* module_name_str = "subsystem_api";
+static int overlay_width = 0;
+static int overlay_height = 0;
+
+static uint32_t color_to_argb(subsystem_overlay_color_e color, uint8_t alpha)
+{
+    switch (color) {
+        case SUBSYS_OVERLAY_COLOR_WHITE:
+            return ARGB(alpha, 255, 255, 255);
+        case SUBSYS_OVERLAY_COLOR_BLACK:
+            return ARGB(alpha, 0, 0, 0);
+        case SUBSYS_OVERLAY_COLOR_RED:
+            return ARGB(alpha, 255, 0, 0);
+        case SUBSYS_OVERLAY_COLOR_GREEN:
+            return ARGB(alpha, 0, 255, 0);
+        case SUBSYS_OVERLAY_COLOR_BLUE:
+            return ARGB(alpha, 0, 0, 255);
+        case SUBSYS_OVERLAY_COLOR_YELLOW:
+            return ARGB(alpha, 255, 255, 0);
+        case SUBSYS_OVERLAY_COLOR_CYAN:
+            return ARGB(alpha, 0, 255, 255);
+        case SUBSYS_OVERLAY_COLOR_MAGENTA:
+            return ARGB(alpha, 255, 0, 255);
+        default:
+            return ARGB(alpha, 255, 255, 255); // Default to white
+    }
+}
 
 static int host_enable_rc_override_stub(const uint8_t *channels, size_t channel_count)
 {
@@ -40,7 +67,15 @@ static int host_register_fc_property_update_callback_stub(fc_property_update_cal
     return 0;
 }
 
-static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, int size)
+static int host_overlay_init_stub(void)
+{
+    int ret = overlay_init();
+    overlay_get_overlay_size(&overlay_width, &overlay_height);
+    // printf("[%s] Overlay initialized with ret =%d, size: %dx%d\n", module_name_str, ret, overlay_width, overlay_height);
+    return ret;
+}
+
+static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, uint8_t alpha, int size)
 {
     (void)point.x;
     (void)point.y;
@@ -51,39 +86,37 @@ static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, con
     return -ENOTSUP;
 }
 
-static int host_overlay_draw_rectangle_stub(subsystem_overlay_point_norm_t left_top, subsystem_overlay_point_norm_t right_bottom, subsystem_overlay_color_e color, int thickness)
+static int host_overlay_draw_rectangle_stub(subsystem_overlay_point_norm_t left_top, subsystem_overlay_point_norm_t right_bottom, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
 {
-    (void)left_top.x;
-    (void)left_top.y;
-    (void)right_bottom.x;
-    (void)right_bottom.y;
-    (void)color;
-    (void)thickness;
-    INFO("overlay_draw_rectangle() is not wired yet");
-    return -ENOTSUP;
+    int x1 = (int)(left_top.x * overlay_width);;
+    int y1 = (int)(left_top.y * overlay_height);
+    int x2 = (int)(right_bottom.x * overlay_width);;
+    int y2 = (int)(right_bottom.y * overlay_height);
+    uint32_t color_value = color_to_argb(color, alpha);
+    overlay_draw_rect(x1, y1, x2, y2, color_value, thickness);
+
+    return 0;
 }
 
-static int host_overlay_draw_crosshair_stub(subsystem_overlay_point_norm_t center, float size, subsystem_overlay_color_e color, int thickness)
+static int host_overlay_draw_crosshair_stub(subsystem_overlay_point_norm_t center, float size, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
 {
-    (void)center.x;
-    (void)center.y;
-    (void)size;
-    (void)color;
-    (void)thickness;
-    INFO("overlay_draw_crosshair() is not wired yet");
-    return -ENOTSUP;
+    int x = (int)(center.x * overlay_width);;
+    int y = (int)(center.y * overlay_height);
+    int pixel_size = (int)(size * (overlay_width < overlay_height ? overlay_width : overlay_height));;
+    uint32_t color_value = color_to_argb(color, alpha);
+    overlay_draw_crosshair(x, y, pixel_size, color_value, thickness);
+    return 0;
 }
 
 static int host_overlay_draw_screen_stub(void)
 {
-    INFO("overlay_draw_screen() is not wired yet");
-    return -ENOTSUP;
+    return overlay_push_to_encoder();
 }
 
 static int host_overlay_clear_stub(void)
 {
-    INFO("overlay_clear() is not wired yet");
-    return -ENOTSUP;
+    overlay_clear();
+    return 0;
 }
 
 static int host_video_start_receiving_stream_stub(uint32_t width, uint32_t height)
@@ -118,6 +151,7 @@ const subsystem_host_api_t g_host_api = {
 		.register_fc_property_update_callback = host_register_fc_property_update_callback_stub,
 	},
 	.overlay = {
+        .init = host_overlay_init_stub,
 		.draw_text = host_overlay_draw_text_stub,
 		.draw_rectangle = host_overlay_draw_rectangle_stub,
 		.draw_crosshair = host_overlay_draw_crosshair_stub,

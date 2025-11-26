@@ -98,37 +98,47 @@ typedef int (*subsystem_send_rc_override_fn)(uint16_t throttle,
 typedef int (*subsystem_register_fc_property_update_callback_fn)(fc_property_update_callback_t callback,
 																   uint32_t frequency_hz);												 
 
+/* Initialize overlay subsystem
+*/
+typedef int (*subsystem_overlay_init_fn)(void);
+
 /* Draw text on overlay
 	@param point Normalized point (0.0 - 1.0) for text position
 	@param text Null-terminated string to draw
 	@param color Color enum value
+	@param alpha Alpha value (0-255)
 	@param size Font size in points
 */
 typedef int (*subsystem_overlay_draw_text_fn)(subsystem_overlay_point_norm_t point,
 											 const char *text,
 											 subsystem_overlay_color_e color,
+											 uint8_t alpha,
 											 int size);
 
 /* Draw rectangle on overlay
 	@param left_top Normalized point (0.0 - 1.0) for top-left corner
 	@param right_bottom Normalized point (0.0 - 1.0) for bottom-right corner
 	@param color Color enum value
+	@param alpha Alpha value (0-255)
 	@param thickness Line thickness in pixels
 */
 typedef int (*subsystem_overlay_draw_rectangle_fn)(subsystem_overlay_point_norm_t left_top,
 													subsystem_overlay_point_norm_t right_bottom,
 													subsystem_overlay_color_e color,
+													uint8_t alpha,
 													int thickness);
 
 /* Draw crosshair on overlay
 	@param center Normalized point (0.0 - 1.0) for crosshair center
 	@param size Size of the crosshair (0.0 - 1.0)
 	@param color Color enum value
+	@param alpha Alpha value (0-255)
 	@param thickness Line thickness in pixels
 */
 typedef int (*subsystem_overlay_draw_crosshair_fn)(subsystem_overlay_point_norm_t center,
 													float size,
 													subsystem_overlay_color_e color,
+													uint8_t alpha,
 													int thickness);
 
 /* Draw screen on overlay; 
@@ -166,6 +176,7 @@ typedef struct subsystem_host_api_s {
     subsystem_register_fc_property_update_callback_fn register_fc_property_update_callback;
 	} fc;
 	struct {
+		subsystem_overlay_init_fn init;
 		subsystem_overlay_draw_text_fn draw_text;
 		subsystem_overlay_draw_rectangle_fn draw_rectangle;
 		subsystem_overlay_draw_crosshair_fn draw_crosshair;
