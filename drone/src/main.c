@@ -24,6 +24,11 @@
 #include "proxy/proxy.h"
 #include "link.h"
 #include "hal/cpuinfo.h"
+#include "pidfile.h"
+
+#define PROC_NAME "vd-link-drone"
+#define PID_FILE     "/var/run/" PROC_NAME ".pid"
+
 
 #define PATH_TO_CONFIG_FILE "/etc/vd-link.config"
 #define DEFAULT_SERIAL "/dev/ttyS0"
@@ -123,6 +128,12 @@ int main(int argc, char *argv[])
     int ret = 0;
 
     screensaver_nv12_t screensaver; // screensaver frame (if camera not available)
+
+    /** Check, create, write pid lock file */
+    if (write_pidfile(PID_FILE) != 0) {
+        /** Exit */
+        exit(0);
+    }
 
     // set defaults configs
     config_init_defaults(&config);

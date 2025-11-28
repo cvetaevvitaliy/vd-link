@@ -111,6 +111,7 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/lib/msp/src
         ${CMAKE_SOURCE_DIR}/lib/ini/src
         ${CMAKE_SOURCE_DIR}/lib/client
+        ${CMAKE_SOURCE_DIR}/lib/pidfile
 )
 
 add_subdirectory(src/fc_conn)
@@ -146,6 +147,7 @@ target_link_libraries(${PROJECT_NAME}
         link
         fc_conn
         drone_client
+        pidfile
         ${JSON-C_LIBRARIES}
         ${CAIRO_LIBRARIES}
         ${RKAIQ_LIBRARY}
