@@ -13,6 +13,8 @@ static pthread_t g_worker_thread;
 static volatile bool g_thread_should_run = false;
 static bool g_worker_started = false;
 
+static uint8_t dummy_buffer[1280*720*3]; // Assuming max size for 720p RGB888
+
 static void fc_properties_callback(const subsystem_fc_properties_t *properties, uint64_t *timestamp_ms)
 {
     (void)timestamp_ms;
@@ -79,20 +81,21 @@ static void demo_fc_api(const subsystem_context_t *ctx)
                   "sample_addon",
                   rc == 0 ? "RC buffer override sent" : "RC buffer override failed");
     }
-
-    if (api->fc.send_rc_override) {
-        uint16_t throttle = demo_channels[0];
-        uint16_t yaw = demo_channels[1];
-        uint16_t pitch = demo_channels[2];
-        uint16_t roll = demo_channels[3];
-        int rc = api->fc.send_rc_override(throttle, yaw, pitch, roll,
-                                 demo_channels[4], demo_channels[5],
-                                 demo_channels[6], demo_channels[7]);
-        subsystem_log(ctx, rc == 0 ? SUBSYS_LOG_INFO : SUBSYS_LOG_WARN,
-                  "sample_addon",
-                  rc == 0 ? "RC override (individual) sent" :
-                  "RC override (individual) failed");
-    }
+    
+    // Not wired yet
+    // if (api->fc.send_rc_override) {
+    //     uint16_t throttle = demo_channels[0];
+    //     uint16_t yaw = demo_channels[1];
+    //     uint16_t pitch = demo_channels[2];
+    //     uint16_t roll = demo_channels[3];
+    //     int rc = api->fc.send_rc_override(throttle, yaw, pitch, roll,
+    //                              demo_channels[4], demo_channels[5],
+    //                              demo_channels[6], demo_channels[7]);
+    //     subsystem_log(ctx, rc == 0 ? SUBSYS_LOG_INFO : SUBSYS_LOG_WARN,
+    //               "sample_addon",
+    //               rc == 0 ? "RC override (individual) sent" :
+    //               "RC override (individual) failed");
+    // }
 }
 
 static void demo_overlay_api(const subsystem_context_t *ctx)
@@ -123,6 +126,9 @@ static void demo_overlay_api(const subsystem_context_t *ctx)
     }
     if (api->overlay.draw_crosshair) {
         api->overlay.draw_crosshair(center, 0.1f, SUBSYS_OVERLAY_COLOR_WHITE, 255, 10);
+    }
+    if (api->overlay.draw_bitmap) {
+        api->overlay.draw_bitmap(10, 10, dummy_buffer, 640, 480, 3); // Example: draw at (10,10)
     }
     if (api->overlay.draw_screen) {
         api->overlay.draw_screen();
@@ -155,7 +161,7 @@ static void demo_video_api(const subsystem_context_t *ctx)
     if (api->video.get_stream_frame) {
         // First call to get required buffer size
         uint64_t timestamp_ms = 0;
-        uint8_t dummy_buffer[1280*720*3]; // Assuming max size for 720p RGB
+       
         size_t frame_size = sizeof(dummy_buffer);
         int ret = api->video.get_stream_frame(dummy_buffer, &frame_size, &timestamp_ms);
         

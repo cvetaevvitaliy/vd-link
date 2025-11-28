@@ -141,6 +141,17 @@ typedef int (*subsystem_overlay_draw_crosshair_fn)(subsystem_overlay_point_norm_
 													uint8_t alpha,
 													int thickness);
 
+/*
+   Draw bitmap on overlay
+	@param x X coordinate in pixels for top-left corner
+	@param y Y coordinate in pixels for top-left corner
+	@param bitmap_data Pointer to bitmap data in ARGB8888 format
+	@param bitmap_width Width of the bitmap in pixels
+	@param bitmap_height Height of the bitmap in pixels
+*/
+typedef int (*subsystem_overlay_draw_bitmap_fn)(int x, int y, const uint8_t *bitmap_data,
+											   int bitmap_width, int bitmap_height, int bpp);
+
 /* Draw screen on overlay; 
 	Should be called after all drawing commands are issued
 */
@@ -180,6 +191,7 @@ typedef struct subsystem_host_api_s {
 		subsystem_overlay_draw_text_fn draw_text;
 		subsystem_overlay_draw_rectangle_fn draw_rectangle;
 		subsystem_overlay_draw_crosshair_fn draw_crosshair;
+		subsystem_overlay_draw_bitmap_fn draw_bitmap;
 		subsystem_overlay_draw_screen_fn draw_screen;
 		subsystem_overlay_clear_fn clear;
 	} overlay;

@@ -117,8 +117,42 @@ static int init_overlay_region(int venc_chn, int region_id, encoder_config_t *en
     // Optional: log the adjustment
     fprintf(stderr, "%s: aligned/clamped to <x=%u, y=%u, w=%u, h=%u>\n", __FUNCTION__, x, y, w, h);
 
-    // Init OSD system for this VENC channel
-    int ret = RK_MPI_VENC_RGN_Init(venc_chn, NULL);
+    // Initialize color table for OSD
+    VENC_COLOR_TBL_S colorTbl;
+    memset(&colorTbl, 0, sizeof(colorTbl));
+    
+    // Setup basic color palette with common colors
+    colorTbl.u32ArgbTbl[0] = 0x00000000;   // Transparent
+    colorTbl.u32ArgbTbl[1] = 0xFF000000;   // Black
+    colorTbl.u32ArgbTbl[2] = 0xFFFFFFFF;   // White  
+    colorTbl.u32ArgbTbl[3] = 0xFFFF0000;   // Red
+    colorTbl.u32ArgbTbl[4] = 0xFF00FF00;   // Green
+    colorTbl.u32ArgbTbl[5] = 0xFF0000FF;   // Blue
+    colorTbl.u32ArgbTbl[6] = 0xFFFFFF00;   // Yellow
+    colorTbl.u32ArgbTbl[7] = 0xFF00FFFF;   // Cyan
+    colorTbl.u32ArgbTbl[8] = 0xFFFF00FF;   // Magenta
+    colorTbl.u32ArgbTbl[9] = 0xFF808080;   // Gray
+    
+    // Fill remaining slots with gradations and common colors
+    for (int i = 10; i < 256; i++) {
+        // Create a gradient of grays and basic colors
+        if (i < 50) {
+            // Grayscale gradient
+            uint8_t gray = (uint8_t)(i * 255 / 50);
+            colorTbl.u32ArgbTbl[i] = 0xFF000000 | (gray << 16) | (gray << 8) | gray;
+        } else {
+            // Various colors for detection/tracking
+            uint8_t r = (i * 137) % 256;
+            uint8_t g = (i * 211) % 256; 
+            uint8_t b = (i * 97) % 256;
+            colorTbl.u32ArgbTbl[i] = 0xFF000000 | (r << 16) | (g << 8) | b;  // Normal RGB order
+        }
+    }
+    
+    colorTbl.bColorDichotomyEnable = RK_TRUE; // Enable binary search for faster lookup
+
+    // Init OSD system for this VENC channel with color table
+    int ret = RK_MPI_VENC_RGN_Init(venc_chn, &colorTbl);
     if (ret) {
         fprintf(stderr, "%s: RGN_Init failed: %d\n", __FUNCTION__, ret);
         return -1;

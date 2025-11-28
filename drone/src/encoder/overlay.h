@@ -25,6 +25,8 @@ void overlay_draw_text(int x, int y, const char *text,
 void overlay_measure_text(const char *text, int size, int *width, int *height);
 void overlay_draw_line(int x1, int y1, int x2, int y2,
                        uint32_t argb_color, int thickness);
+void overlay_draw_bitmap(int x, int y, const uint8_t *bitmap_data,
+                         int bitmap_width, int bitmap_height, int bpp);
 int  overlay_push_to_encoder(void);
 void overlay_get_overlay_size(int *width, int *height);
 

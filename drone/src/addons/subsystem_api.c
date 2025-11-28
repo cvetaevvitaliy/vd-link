@@ -107,6 +107,13 @@ static int host_overlay_draw_crosshair_stub(subsystem_overlay_point_norm_t cente
     return 0;
 }
 
+static int host_overlay_draw_bitmap_stub(int x, int y, const uint8_t *bitmap_data,
+                                        int bitmap_width, int bitmap_height, int bpp)
+{
+    overlay_draw_bitmap(x, y, bitmap_data, bitmap_width, bitmap_height, bpp);
+    return 0;
+}
+
 static int host_overlay_draw_screen_stub(void)
 {
     return overlay_push_to_encoder();
@@ -164,6 +171,7 @@ const subsystem_host_api_t g_host_api = {
 		.draw_rectangle = host_overlay_draw_rectangle_stub,
 		.draw_crosshair = host_overlay_draw_crosshair_stub,
 		.draw_screen = host_overlay_draw_screen_stub,
+        .draw_bitmap = host_overlay_draw_bitmap_stub,
 		.clear = host_overlay_clear_stub,
 	},
     .video = {

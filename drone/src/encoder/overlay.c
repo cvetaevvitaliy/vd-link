@@ -209,7 +209,7 @@ void overlay_draw_text(int x, int y, const char *text,
     
     cairo_t *cr = cairo_create(surface);
     
-    // Extract ARGB components
+    // Extract ARGB components and swap R/B for Cairo BGR format
     double alpha = ((argb_color >> 24) & 0xFF) / 255.0;
     double red   = ((argb_color >> 16) & 0xFF) / 255.0;
     double green = ((argb_color >> 8) & 0xFF) / 255.0;
@@ -231,6 +231,39 @@ void overlay_draw_text(int x, int y, const char *text,
     // Cleanup
     cairo_destroy(cr);
     cairo_surface_destroy(surface);
+}
+
+void overlay_draw_bitmap(int x, int y, const uint8_t *bitmap_data,
+                         int bitmap_width, int bitmap_height, int bpp)
+{
+    if (!bitmap_data || !overlay_buffer) return;
+
+    for (int by = 0; by < bitmap_height; ++by) {
+        for (int bx = 0; bx < bitmap_width; ++bx) {
+            int dest_x = x + bx;
+            int dest_y = y + by;
+            uint32_t argb = 0x00000000; // Default transparent
+            if (bpp == 4) {
+                // Assume input is in ARGB8888 format, swap R/B channels for RK Media BGR format
+                const uint8_t *src_pixel = bitmap_data + (by * bitmap_width + bx) * 4;
+                argb = ((uint32_t)src_pixel[0] << 24) | // A
+                       ((uint32_t)src_pixel[3] << 16) | // B -> R position 
+                       ((uint32_t)src_pixel[2] << 8)  | // G
+                       ((uint32_t)src_pixel[1] << 0);    // R -> B position
+            } else if (bpp == 3) {
+                // Assume input is in RGB888 format, set A=255, swap R/B channels for RK Media BGR format
+                const uint8_t *src_pixel = bitmap_data + (by * bitmap_width + bx) * 3;
+                argb = (0xFF << 24) | // A=255
+                       ((uint32_t)src_pixel[2] << 16) | // B -> R position
+                       ((uint32_t)src_pixel[1] << 8)  | // G
+                       ((uint32_t)src_pixel[0] << 0);    // R -> B position
+            } else {
+                // Unsupported bpp
+                continue;
+            }
+            overlay_set_pixel(dest_x, dest_y, argb);
+        }
+    }
 }
 
 void overlay_measure_text(const char *text, int size, int *width, int *height)
