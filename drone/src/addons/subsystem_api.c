@@ -34,7 +34,7 @@ static uint32_t color_to_argb(subsystem_overlay_color_e color, uint8_t alpha)
     }
 }
 
-static int host_enable_rc_override_stub(const uint8_t *channels, size_t channel_count)
+static int host_enable_rc_override(const uint8_t *channels, size_t channel_count)
 {
 	(void)channels;
 	(void)channel_count;
@@ -42,33 +42,35 @@ static int host_enable_rc_override_stub(const uint8_t *channels, size_t channel_
 	return 0;
 }
 
-static int host_send_rc_buf_override_stub(const uint16_t *channels, size_t channel_count)
+static int host_send_rc_buf_override(const uint16_t *channels, size_t channel_count)
 {
     send_rc_override_to_fc((uint16_t*)channels, channel_count);
     return 0;
 }
 
-static int host_send_rc_override_stub(uint16_t throttle, uint16_t yaw, uint16_t pitch, uint16_t roll, uint16_t aux1, uint16_t aux2, uint16_t aux3, uint16_t aux4)
+static int host_send_rc_override(uint16_t throttle, uint16_t yaw, uint16_t pitch, uint16_t roll, uint16_t aux1, uint16_t aux2, uint16_t aux3, uint16_t aux4)
 {
-    (void)throttle;
-    (void)yaw;
-    (void)pitch;
-    (void)roll;
-    (void)aux1;
-    (void)aux2;
-    (void)aux3;
-    (void)aux4;
-    INFO("send_rc_override() is not wired yet");
-    return -ENOTSUP;
+    // Assume AETR1234 ordering until channel mapping is implemented
+    uint16_t buf[8];
+    buf[0] = roll;
+    buf[1] = pitch;
+    buf[2] = throttle;
+    buf[3] = yaw;
+    buf[4] = aux1;
+    buf[5] = aux2;
+    buf[6] = aux3;
+    buf[7] = aux4;
+    send_rc_override_to_fc(buf, 8);
+    return 0;
 }
 
-static int host_register_fc_property_update_callback_stub(fc_property_update_callback_t callback, uint32_t frequency_hz)
+static int host_register_fc_property_update_callback(fc_property_update_callback_t callback, uint32_t frequency_hz)
 {
     register_fc_property_update_callback(callback, frequency_hz);
     return 0;
 }
 
-static int host_overlay_init_stub(void)
+static int host_overlay_init(void)
 {
     int ret = overlay_init();
     overlay_get_overlay_size(&overlay_width, &overlay_height);
@@ -76,7 +78,7 @@ static int host_overlay_init_stub(void)
     return ret;
 }
 
-static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, uint8_t alpha, int size)
+static int host_overlay_draw_text(subsystem_overlay_point_norm_t point, const char *text, subsystem_overlay_color_e color, uint8_t alpha, int size)
 {
     int x = (int)(point.x * overlay_width);;
     int y = (int)(point.y * overlay_height);;
@@ -85,7 +87,7 @@ static int host_overlay_draw_text_stub(subsystem_overlay_point_norm_t point, con
     return 0;
 }
 
-static int host_overlay_draw_rectangle_stub(subsystem_overlay_point_norm_t left_top, subsystem_overlay_point_norm_t right_bottom, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
+static int host_overlay_draw_rectangle(subsystem_overlay_point_norm_t left_top, subsystem_overlay_point_norm_t right_bottom, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
 {
     int x1 = (int)(left_top.x * overlay_width);;
     int y1 = (int)(left_top.y * overlay_height);
@@ -97,7 +99,7 @@ static int host_overlay_draw_rectangle_stub(subsystem_overlay_point_norm_t left_
     return 0;
 }
 
-static int host_overlay_draw_crosshair_stub(subsystem_overlay_point_norm_t center, float size, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
+static int host_overlay_draw_crosshair(subsystem_overlay_point_norm_t center, float size, subsystem_overlay_color_e color, uint8_t alpha, int thickness)
 {
     int x = (int)(center.x * overlay_width);;
     int y = (int)(center.y * overlay_height);
@@ -107,18 +109,18 @@ static int host_overlay_draw_crosshair_stub(subsystem_overlay_point_norm_t cente
     return 0;
 }
 
-static int host_overlay_draw_screen_stub(void)
+static int host_overlay_draw_screen(void)
 {
     return overlay_push_to_encoder();
 }
 
-static int host_overlay_clear_stub(void)
+static int host_overlay_clear(void)
 {
     overlay_clear();
     return 0;
 }
 
-static int host_video_start_receiving_stream_stub(uint32_t width, uint32_t height)
+static int host_video_start_receiving_stream(uint32_t width, uint32_t height)
 {
     (void)width;
     (void)height;
@@ -126,13 +128,13 @@ static int host_video_start_receiving_stream_stub(uint32_t width, uint32_t heigh
     return 0; // Frame capture is already enabled during camera initialization
 }
 
-static int host_video_stop_receiving_stream_stub(void)
+static int host_video_stop_receiving_stream(void)
 {
     INFO("video_stop_receiving_stream(): Frame capture terminated");
     return 0; // For now, just return success
 }
 
-static int host_video_get_stream_frame_stub(uint8_t* frame_data, size_t* frame_size, uint64_t* timestamp_ms)
+static int host_video_get_stream_frame(uint8_t* frame_data, size_t* frame_size, uint64_t* timestamp_ms)
 {
     if (!frame_data || !frame_size || !timestamp_ms) {
         return -EINVAL;
@@ -153,22 +155,22 @@ static int host_video_get_stream_frame_stub(uint8_t* frame_data, size_t* frame_s
 
 const subsystem_host_api_t g_host_api = {
 	.fc = {
-		.enable_rc_override = host_enable_rc_override_stub,
-		.send_rc_buf_override = host_send_rc_buf_override_stub,
-		.send_rc_override = host_send_rc_override_stub,
-		.register_fc_property_update_callback = host_register_fc_property_update_callback_stub,
+		.enable_rc_override = host_enable_rc_override,
+		.send_rc_buf_override = host_send_rc_buf_override,
+		.send_rc_override = host_send_rc_override,
+		.register_fc_property_update_callback = host_register_fc_property_update_callback,
 	},
 	.overlay = {
-        .init = host_overlay_init_stub,
-		.draw_text = host_overlay_draw_text_stub,
-		.draw_rectangle = host_overlay_draw_rectangle_stub,
-		.draw_crosshair = host_overlay_draw_crosshair_stub,
-		.draw_screen = host_overlay_draw_screen_stub,
-		.clear = host_overlay_clear_stub,
+        .init = host_overlay_init,
+		.draw_text = host_overlay_draw_text,
+		.draw_rectangle = host_overlay_draw_rectangle,
+		.draw_crosshair = host_overlay_draw_crosshair,
+		.draw_screen = host_overlay_draw_screen,
+		.clear = host_overlay_clear,
 	},
     .video = {
-        .start_receiving_stream = host_video_start_receiving_stream_stub,
-        .stop_receiving_stream = host_video_stop_receiving_stream_stub,
-        .get_stream_frame = host_video_get_stream_frame_stub,
+        .start_receiving_stream = host_video_start_receiving_stream,
+        .stop_receiving_stream = host_video_stop_receiving_stream,
+        .get_stream_frame = host_video_get_stream_frame,
     }
 };
