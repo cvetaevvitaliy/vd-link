@@ -4,6 +4,7 @@
 
 #include "fc_conn.h"
 #include "encoder/overlay.h"
+#include "camera/camera_csi.h"
 
 static const char* module_name_str = "subsystem_api";
 static int overlay_width = 0;
@@ -121,23 +122,32 @@ static int host_video_start_receiving_stream_stub(uint32_t width, uint32_t heigh
 {
     (void)width;
     (void)height;
-    INFO("video_start_receiving_stream() is not wired yet");
-    return -ENOTSUP;
+    INFO("video_start_receiving_stream(): Frame capture is enabled automatically");
+    return 0; // Frame capture is already enabled during camera initialization
 }
 
 static int host_video_stop_receiving_stream_stub(void)
 {
-    INFO("video_stop_receiving_stream() is not wired yet");
-    return -ENOTSUP;
+    INFO("video_stop_receiving_stream(): Frame capture terminated");
+    return 0; // For now, just return success
 }
 
 static int host_video_get_stream_frame_stub(uint8_t* frame_data, size_t* frame_size, uint64_t* timestamp_ms)
 {
-    (void)frame_data;
-    (void)frame_size;
-    (void)timestamp_ms;
-    INFO("video_get_stream_frame() is not wired yet");
-    return -ENOTSUP;
+    if (!frame_data || !frame_size || !timestamp_ms) {
+        return -EINVAL;
+    }
+
+    uint32_t width, height;
+    int ret = camera_csi_get_latest_frame(frame_data, frame_size, &width, &height, timestamp_ms);
+
+    if (ret == -1) {
+        return -EAGAIN; // No frame available yet
+    } else if (ret == -2) {
+        return -E2BIG; // Buffer too small, frame_size contains required size
+    }
+
+    return 0; // Success
 }
 
 

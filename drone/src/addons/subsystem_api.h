@@ -162,7 +162,7 @@ typedef int (*subsystem_video_stop_receiving_stream_fn)(void);
 
 /* Get video stream frame;
 	@param frame_data Pointer to buffer to receive frame data
-	@param frame_size Pointer to variable to receive frame size
+	@param frame_size Pointer to variable to receive frame size; on input, should contain size of provided buffer
 	@param timestamp_ms Pointer to variable to receive frame timestamp in milliseconds
 */
 typedef int (*subsystem_video_get_stream_frame_fn)(uint8_t* frame_data, size_t *frame_size, uint64_t *timestamp_ms);

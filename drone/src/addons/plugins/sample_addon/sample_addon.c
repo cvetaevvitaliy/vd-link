@@ -153,12 +153,23 @@ static void demo_video_api(const subsystem_context_t *ctx)
     }
 
     if (api->video.get_stream_frame) {
-        uint8_t frame_stub[64] = {0};
-        uint32_t frame_size = 0;
+        // First call to get required buffer size
         uint64_t timestamp_ms = 0;
-        api->video.get_stream_frame(frame_stub, &frame_size, &timestamp_ms);
-        subsystem_log(ctx, SUBSYS_LOG_INFO, "sample_addon",
-                  "Polled video stream frame");
+        uint8_t dummy_buffer[1280*720*3]; // Assuming max size for 720p RGB
+        size_t frame_size = sizeof(dummy_buffer);
+        int ret = api->video.get_stream_frame(dummy_buffer, &frame_size, &timestamp_ms);
+        
+        if (ret == -12) { // -E2BIG: buffer too small, frame_size contains required size
+            printf("[sample_addon] Frame available: size=%zu bytes, timestamp=%llu ms\n", 
+                   frame_size, (unsigned long long)timestamp_ms);
+        } else if (ret == -11) { // -EAGAIN: no frame available yet
+            printf("[sample_addon] No frame available yet\n");
+        } else if (ret == 0) {
+            printf("[sample_addon] Got frame info: size=%zu, timestamp=%llu\n", 
+                   frame_size, (unsigned long long)timestamp_ms);
+        } else {
+            printf("[sample_addon] Frame query failed with error: %d\n", ret);
+        }
     }
 }
 
@@ -193,7 +204,7 @@ static void *sample_addon_thread(void *arg)
     while (g_thread_should_run) {
         demo_fc_api(ctx);
         demo_overlay_api(ctx);
-        // demo_video_api(ctx);
+        demo_video_api(ctx);
 
         sleep(1);
     }

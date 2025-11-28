@@ -219,8 +219,11 @@ int main(int argc, char *argv[])
     camera_manager_print_all(&camera_manager);
     camera_info_t *primary_camera = camera_manager_get_primary(&camera_manager);
 
-    // Start RKNN thread for object detection
-    rknn_thread_start();
+    // Start RKNN thread for object detection (disabled for addon development)
+    // rknn_thread_start();
+
+    // Initialize frame capture for addons (using same approach as RKNN)
+    camera_csi_enable_frame_capture(config.camera_csi_config.cam_id, 640, 480);
 
     // Connect to flight controller early to get device UID
     if (connect_to_fc(DEFAULT_SERIAL, 115200) != 0) {
@@ -386,7 +389,8 @@ int main(int argc, char *argv[])
         camera_manager_deinit_camera(&camera_manager, &config, camera_manager_get_current_camera(&camera_manager));
     }
 
-    rknn_thread_stop();
+    // rknn_thread_stop();
+    camera_csi_disable_frame_capture();
     camera_csi_deinit(&config.camera_csi_config);
     link_stop_telemetry_thread();
     disconnect_from_fc();
