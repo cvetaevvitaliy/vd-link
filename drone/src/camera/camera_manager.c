@@ -778,11 +778,10 @@ int camera_manager_bind_camera(camera_manager_t *manager, common_config_t *confi
         camera_csi_bind_encoder(config->camera_csi_config.cam_id, 0 /* encoder id */);
 
         // Bind camera to RKNN via RGA CAM_ID->CH1
-        if (model_width > 0 && model_height > 0) {
-            camera_csi_bind_rknn(config->camera_csi_config.cam_id,1 /* camera channel */,
-                                1 /* rga channel */,
-                                model_width, model_height);
-        }
+        // if (model_width > 0 && model_height > 0) {
+        //     camera_csi_bind_rknn(config->camera_csi_config.cam_id, 1, 1, model_width, model_height);
+        // }
+       camera_csi_bind_rknn(config->camera_csi_config.cam_id, 1, 1, 640, 480);
     } else if (camera->type == CAMERA_USB || camera->type == CAMERA_THERMAL) {
         encoder_set_input_image_format(config->camera_usb_config.pixel_format,
                                        config->camera_usb_config.width, config->camera_usb_config.height);

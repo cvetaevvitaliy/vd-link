@@ -6,8 +6,23 @@
 #include "camera/isp/sample_common.h"
 
 #include <easymedia/rkmedia_api.h>
+#include <pthread.h>
+#include <string.h>
+#include <sys/time.h>
 
 #define DEFAULT_IQ_FILES_PATH "/etc/iqfiles"
+
+// Frame capture for addons (same approach as RKNN)
+static pthread_mutex_t frame_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t frame_capture_thread;
+static uint8_t* current_frame_data = NULL;
+static size_t current_frame_size = 0;
+static uint32_t current_frame_width = 0;
+static uint32_t current_frame_height = 0;
+static uint64_t current_frame_timestamp = 0;
+static volatile bool new_frame = false;
+static volatile bool frame_capture_enabled = false;
+static frame_callback_t frame_callback = NULL;
 
 int camera_csi_init(camera_csi_config_t *cfg)
 {
@@ -274,6 +289,165 @@ int set_camera_csi_saturation(int cam_id, uint32_t saturation)
 int set_camera_csi_sharpness(int cam_id, uint32_t sharpness)
 {
     return SAMPLE_COMM_ISP_SET_Sharpness(cam_id, sharpness);
+}
+
+static uint64_t get_timestamp_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
+}
+
+static void* frame_capture_thread_func(void* arg)
+{
+    (void)arg;
+    printf("Frame capture thread started\n");
+    
+    MB_IMAGE_INFO_S stImageInfo = {0};
+    MEDIA_BUFFER mb = NULL;
+
+    while (frame_capture_enabled) {
+        if (current_frame_data) {
+            // Use RGA channel 1 (same as RKNN approach)  
+            mb = RK_MPI_SYS_GetMediaBuffer(RK_ID_RGA, 1, 100);
+            if (!mb) {
+                static int null_buffer_count = 0;
+                null_buffer_count++;
+                if (null_buffer_count % 100 == 1) { // Print every 100 failures
+                    printf("[ FRAME_CAPTURE ] RGA get null buffer! (count: %d)\n", null_buffer_count);
+                }
+                usleep(10 * 1000); // 10 ms sleep to avoid busy loop
+                continue;
+            }
+            
+            int ret = RK_MPI_MB_GetImageInfo(mb, &stImageInfo);
+            if (ret == 0) {
+                // Update frame dimensions from media buffer
+                current_frame_width = stImageInfo.u32Width;
+                current_frame_height = stImageInfo.u32Height;
+            } else {
+                printf("[ FRAME_CAPTURE ] Warn: Get image info failed! ret = %d\n", ret);
+            }
+            
+            pthread_mutex_lock(&frame_mutex);
+            
+            size_t frame_size = RK_MPI_MB_GetSize(mb);
+            if (frame_size > 0 && frame_size <= current_frame_size) {
+                memcpy(current_frame_data, RK_MPI_MB_GetPtr(mb), frame_size);
+                current_frame_timestamp = RK_MPI_MB_GetTimestamp(mb);
+                new_frame = true;
+                
+                // Call registered callback if exists
+                if (frame_callback) {
+                    frame_callback(current_frame_data, frame_size, 
+                                  current_frame_width, current_frame_height, 
+                                  current_frame_timestamp);
+                }
+            }
+            
+            pthread_mutex_unlock(&frame_mutex);
+            RK_MPI_MB_ReleaseBuffer(mb);
+        } else {
+            usleep(10 * 1000);
+        }
+    }
+    
+    printf("Frame capture thread stopped\n");
+    return NULL;
+}
+
+int camera_csi_set_frame_callback(frame_callback_t callback)
+{
+    frame_callback = callback;
+    return 0;
+}
+
+int camera_csi_get_latest_frame(uint8_t* frame_data, size_t* frame_size, 
+                               uint32_t* width, uint32_t* height, uint64_t* timestamp_ms)
+{
+    if (!frame_data || !frame_size || !width || !height || !timestamp_ms) {
+        return -1;
+    }
+    
+    pthread_mutex_lock(&frame_mutex);
+    
+    if (!current_frame_data || !new_frame) {
+        pthread_mutex_unlock(&frame_mutex);
+        return -1; // No frame available
+    }
+    
+    if (*frame_size < current_frame_size) {
+        *frame_size = current_frame_size; // Return required size
+        pthread_mutex_unlock(&frame_mutex);
+        return -2; // Buffer too small
+    }
+    
+    memcpy(frame_data, current_frame_data, current_frame_size);
+    *frame_size = current_frame_size;
+    *width = current_frame_width;
+    *height = current_frame_height;
+    *timestamp_ms = current_frame_timestamp;
+    
+    new_frame = false; // Mark frame as consumed
+    
+    pthread_mutex_unlock(&frame_mutex);
+    
+    return 0;
+}
+
+int camera_csi_enable_frame_capture(int cam_id, uint32_t width, uint32_t height)
+{
+    if (frame_capture_enabled) {
+        return 0; // Already enabled
+    }
+    
+    current_frame_width = width;
+    current_frame_height = height;
+    
+    // Allocate buffer for frame data (same as RKNN approach)
+    current_frame_size = width * height * 3; // NV12 is 1.5 bytes per pixel, but allocate more for safety
+    current_frame_data = malloc(current_frame_size);
+    if (!current_frame_data) {
+        printf("ERROR: Failed to allocate frame buffer\n");
+        return -1;
+    }
+    
+    frame_capture_enabled = true;
+    
+    printf("Frame capture enabled %dx%d (VI/RGA channels set up separately)\n", width, height);
+    
+    int ret = pthread_create(&frame_capture_thread, NULL, frame_capture_thread_func, NULL);
+    if (ret != 0) {
+        printf("ERROR: Failed to create frame capture thread: %d\n", ret);
+        frame_capture_enabled = false;
+        free(current_frame_data);
+        current_frame_data = NULL;
+        return -1;
+    }
+    
+    return 0;
+}
+
+void camera_csi_disable_frame_capture(void)
+{
+    if (!frame_capture_enabled) {
+        return;
+    }
+    
+    frame_capture_enabled = false;
+    pthread_join(frame_capture_thread, NULL);
+    
+    if (current_frame_data) {
+        free(current_frame_data);
+        current_frame_data = NULL;
+    }
+    
+    current_frame_size = 0;
+    current_frame_width = 0;
+    current_frame_height = 0;
+    current_frame_timestamp = 0;
+    
+    printf("Frame capture disabled\n");
 }
 
 int camera_csi_set_hdr_mode(int cam_id, bool enable)
