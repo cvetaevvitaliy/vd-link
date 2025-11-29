@@ -11,7 +11,8 @@
 typedef enum {
     CODEC_UNKNOWN = 0,
     CODEC_H264,
-    CODEC_H265
+    CODEC_H265,
+    CODEC_HEVC
 } codec_type_t;
 
 struct config_t {

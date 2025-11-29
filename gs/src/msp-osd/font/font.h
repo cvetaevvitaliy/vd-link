@@ -4,9 +4,17 @@
 
 #include "../util/display_info.h"
 
+#ifdef PLATFORM_ROCKCHIP
 #define FALLBACK_FONT_PATH "/usr/etc/msp-osd/fonts/font"
 #define ENTWARE_FONT_PATH "/opt/fonts/font"
 #define SDCARD_FONT_PATH "/storage/sdcard0/font"
+#endif
+
+#ifdef PLATFORM_DESKTOP
+#define FALLBACK_FONT_PATH "../assets/fonts/font"
+#define ENTWARE_FONT_PATH "assets/fonts/font"
+#define SDCARD_FONT_PATH "../../assets/fonts/font"
+#endif
 
 #define FALLBACK_FONT NULL
 

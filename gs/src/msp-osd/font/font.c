@@ -15,6 +15,73 @@
 #define HD_FONT_WIDTH 24
 
 /* Font helper methods */
+#ifdef PLATFORM_DESKTOP
+#include <SDL2/SDL.h>
+#include "unicode_utils.h"
+#ifdef _WIN32
+#include "portable/mmap_compat.h"
+#else
+#include <sys/mman.h>
+#endif
+#ifndef _WIN32
+#ifdef __APPLE__
+#include <sys/syslimits.h>
+#else
+#include <limits.h>
+#endif
+#endif
+
+static void get_base_path(char *out, size_t len)
+{
+    char *sdl_base = SDL_GetBasePath();
+
+    if (sdl_base) {
+#ifdef _WIN32
+        // On Windows SDL may return path in local encoding
+        // Check if it's valid UTF-8 and convert if necessary
+        int cp_result = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, sdl_base, -1, NULL, 0);
+        if (cp_result == 0 && GetLastError() == ERROR_NO_UNICODE_TRANSLATION) {
+            // SDL returned path not in UTF-8, try to convert from local encoding
+            int wide_len = MultiByteToWideChar(CP_ACP, 0, sdl_base, -1, NULL, 0);
+            if (wide_len > 0) {
+                wchar_t* wide_path = malloc(wide_len * sizeof(wchar_t));
+                if (wide_path) {
+                    MultiByteToWideChar(CP_ACP, 0, sdl_base, -1, wide_path, wide_len);
+
+                    // Convert from UTF-16 to UTF-8
+                    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide_path, -1, NULL, 0, NULL, NULL);
+                    if (utf8_len > 0 && utf8_len <= (int)len) {
+                        WideCharToMultiByte(CP_UTF8, 0, wide_path, -1, out, utf8_len, NULL, NULL);
+                    } else {
+                        snprintf(out, len, "%s", sdl_base);
+                    }
+                    free(wide_path);
+                } else {
+                    snprintf(out, len, "%s", sdl_base);
+                }
+            } else {
+                snprintf(out, len, "%s", sdl_base);
+            }
+        } else {
+            snprintf(out, len, "%s", sdl_base);
+        }
+#else
+        snprintf(out, len, "%s", sdl_base);
+#endif
+        SDL_free(sdl_base);
+    } else {
+        snprintf(out, len, "./");
+    }
+
+#ifdef _WIN32
+    // Normalize backslashes → slashes for POSIX-style consistency
+    for (char *p = out; *p; ++p) {
+        if (*p == '\\')
+            *p = '/';
+    }
+#endif
+}
+#endif
 
 void get_font_path_with_extension(char *font_path_dest, const char *font_path, const char *extension, uint8_t len, uint8_t is_hd, const char *font_variant)
 {
@@ -41,6 +108,7 @@ void get_font_path_with_extension(char *font_path_dest, const char *font_path, c
 
 static int open_font(const char *filename, display_info_t *display_info, const char *font_variant)
 {
+#ifdef PLATFORM_ROCKCHIP
     char file_path[255];
     int is_hd = (display_info->font_width == HD_FONT_WIDTH) ? 1 : 0;
     get_font_path_with_extension(file_path, filename, ".png", 255, is_hd, font_variant);
@@ -61,6 +129,61 @@ static int open_font(const char *filename, display_info_t *display_info, const c
     }
 
     spng_ctx *ctx = spng_ctx_new(0);
+#endif
+
+#ifdef PLATFORM_DESKTOP
+    char file_path[PATH_MAX];
+    char base_path[PATH_MAX];
+    char full_path[PATH_MAX];
+    get_base_path(base_path, sizeof(base_path));
+    DEBUG_PRINT("Base path: %s\n", base_path);
+
+    int is_hd = (display_info->font_width == HD_FONT_WIDTH) ? 1 : 0;
+    get_font_path_with_extension(file_path, filename, ".png", 255, is_hd, font_variant);
+
+    // Use safer string concatenation to avoid truncation warnings
+    size_t base_len = strlen(base_path);
+    size_t file_len = strlen(file_path);
+    if (base_len + file_len >= sizeof(full_path)) {
+        DEBUG_PRINT("Font path too long: %s + %s\n", base_path, file_path);
+        return -1;
+    }
+
+    // Use strncpy and strncat for safer string operations
+    strncpy(full_path, base_path, sizeof(full_path) - 1);
+    full_path[sizeof(full_path) - 1] = '\0';
+    strncat(full_path, file_path, sizeof(full_path) - strlen(full_path) - 1);
+
+    DEBUG_PRINT("Full path font: %s\n", full_path);
+    strcpy(file_path, full_path);
+    DEBUG_PRINT("Opening font: %s\n", file_path);
+    struct stat st;
+    memset(&st, 0, sizeof(st));
+    //stat(file_path, &st);
+    if (unicode_stat(file_path, &st) != 0) {
+        DEBUG_PRINT("Font file not found: %s\n", file_path);
+        return -1;
+    }
+    size_t filesize = st.st_size;
+    if(!(filesize > 0)) {
+        DEBUG_PRINT("Font file did not exist: %s\n", file_path);
+        return -1;
+    }
+
+    FILE *fd = unicode_fopen(file_path, "rb");
+    if (!fd) {
+        DEBUG_PRINT("Could not open file %s\n", file_path);
+        return -1;
+    }
+
+    spng_ctx *ctx = spng_ctx_new(0);
+    if (ctx == NULL) {
+        printf("Failed to create PNG context\n");
+        fclose(fd);
+        return -1;
+    }
+#endif
+
     DEBUG_PRINT("Allocated PNG context\n");
     // Set some kind of reasonable PNG limit so we don't get blown up
     size_t limit = 1024 * 1024 * 64;
@@ -102,7 +225,7 @@ static int open_font(const char *filename, display_info_t *display_info, const c
         goto err;
     }
 
-    DEBUG_PRINT("Allocating image size %d\n", image_size);
+    DEBUG_PRINT("Allocating image size %zu\n", image_size);
 
     void* font_data = malloc(image_size);
     ret = spng_decode_image(ctx, font_data, image_size, SPNG_FMT_RGBA8, 0);
@@ -125,9 +248,9 @@ static int open_font(const char *filename, display_info_t *display_info, const c
     }
 
     for(int page = 0; page < num_pages; page++) {
-        DEBUG_PRINT("Loading font page %d of %d, placing %x\n", page, num_pages, display_info->fonts);
+        DEBUG_PRINT("Loading font page %d of %d, placing %p\n", page, num_pages, display_info->fonts);
         display_info->fonts[page] = malloc(display_info->font_width * display_info->font_height * NUM_CHARS * BYTES_PER_PIXEL);
-        DEBUG_PRINT("Allocated %d bytes for font page buf at%x\n", display_info->font_width * display_info->font_height * NUM_CHARS * BYTES_PER_PIXEL, display_info->fonts[page]);
+        DEBUG_PRINT("Allocated %d bytes for font page buf at%p\n", display_info->font_width * display_info->font_height * NUM_CHARS * BYTES_PER_PIXEL, display_info->fonts[page]);
         for(int char_num = 0; char_num < NUM_CHARS; char_num++) {
             for(int y = 0; y < display_info->font_height; y++) {
                 // Copy each character line at a time into the correct font buffer
