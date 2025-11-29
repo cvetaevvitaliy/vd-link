@@ -11,6 +11,8 @@ typedef enum {
     STR_GOODBYE,
     STR_START,
     STR_STOP,
+    STR_BATT,
+    STR_STATUS,
     STR_COUNT
 } lang_key_t;
 
@@ -19,7 +21,9 @@ static const char *lang_ua[STR_COUNT] = {
     [STR_HELLO]     = "Привіт",
     [STR_GOODBYE]   = "До побачення",
     [STR_START]     = "Пуск",
-    [STR_STOP]      = "Стоп"
+    [STR_STOP]      = "Стоп",
+    [STR_BATT]      = "Батарея",
+    [STR_STATUS]    = "Статус",
 };
 
 // English
@@ -27,7 +31,9 @@ static const char *lang_en[STR_COUNT] = {
     [STR_HELLO]     = "Hello",
     [STR_GOODBYE]   = "Goodbye",
     [STR_START]     = "Start",
-    [STR_STOP]      = "Stop"
+    [STR_STOP]      = "Stop",
+    [STR_BATT]      = "Battery",
+    [STR_STATUS]    = "Status",
 };
 
 void lang_set_ukrainian(void);

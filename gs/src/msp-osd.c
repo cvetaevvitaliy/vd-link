@@ -10,9 +10,12 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <malloc.h>
-#include <bits/pthreadtypes.h>
-#include <stdatomic.h>
+#ifdef _WIN32
+#include "portable/mmap_compat.h"
+#else
+#include <sys/mman.h>
+#endif
+#include <stdlib.h>
 #include <pthread.h>
 #include "msp-osd.h"
 #include "msp/msp.h"
@@ -34,9 +37,10 @@
 #define DEBUG_PRINT_LINK 0
 
 static pthread_t msp_thread;
-static atomic_int running = 0;
+static volatile bool running = false;
 
 static char current_fc_variant[5];
+static msp_state_t msp_state = {0, MSP_IDLE, 0, {0}};
 
 #define SPLASH_STRING "OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
@@ -52,7 +56,7 @@ static char current_fc_variant[5];
 static uint16_t msp_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_render_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t overlay_character_map[MAX_DISPLAY_X][MAX_DISPLAY_Y];
-static displayport_vtable_t *display_driver;
+static displayport_vtable_t display_driver = {0, 0, 0, 0};
 struct timespec last_render;
 static volatile bool need_render = false;
 
@@ -241,7 +245,7 @@ static void start_display(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
     memset(overlay_character_map, 0, sizeof(overlay_character_map));
 
-    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
+    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING) - 4, MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
     msp_draw_complete();
 }
 
@@ -266,7 +270,7 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
 
 static void msp_callback(msp_msg_t *msp_message)
 {
-    displayport_process_message(display_driver, msp_message);
+    displayport_process_message(&display_driver, msp_message);
 }
 
 static void load_fonts(char* font_variant)
@@ -374,14 +378,12 @@ static void* msp_osd_thread(void *arg)
     fakehd_disable();
     current_display_info = &hd_display_info; // TODO: add presets for 1920x1080, 1280x720 display
 
-    display_driver = calloc(1, sizeof(displayport_vtable_t));
-    display_driver->draw_character = &msp_draw_character;
-    display_driver->clear_screen = &msp_clear_screen;
-    display_driver->draw_complete = &msp_draw_complete;
-    display_driver->set_options = &msp_set_options;
+    display_driver.draw_character = &msp_draw_character;
+    display_driver.clear_screen = &msp_clear_screen;
+    display_driver.draw_complete = &msp_draw_complete;
+    display_driver.set_options = &msp_set_options;
 
-    msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
-    msp_state->cb = &msp_callback;
+    msp_state.cb = &msp_callback;
 
     load_fonts("btfl");
 
@@ -404,7 +406,7 @@ static void* msp_osd_thread(void *arg)
     usleep(100000);
     msp_draw_complete();
 #endif
-    while (atomic_load(&running)) {
+    while (running) {
         // noting now
         if(need_render) {
             render_display();
@@ -415,9 +417,10 @@ static void* msp_osd_thread(void *arg)
     wfb_status_link_stop();
 #endif
 
-    free(display_driver);
-    free(msp_state);
-    free(fb_addr);
+    if (fb_addr) {
+        free(fb_addr);
+        fb_addr = NULL;
+    }
 
     close_all_fonts();
 
@@ -436,21 +439,20 @@ void *msp_osd_get_fb_addr(void)
 
 int msp_osd_init(struct config_t *cfg)
 {
-    int expected = 0;
-    if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
-        printf("[ MSP OSD ] Already running thread\n");
+    if (running) {
+        printf("[ MSP OSD ] Already running\n");
         return -1;
     }
+    running = true;
     return pthread_create(&msp_thread, NULL, msp_osd_thread, cfg);
-
 }
 
 void msp_osd_stop(void)
 {
-    if (!atomic_load(&running)) {
+    if (!running) {
         printf("[ MSP OSD ] Not running, nothing to stop\n");
         return;
     }
-    atomic_store(&running, 0);
+    running = false;
     pthread_join(msp_thread, NULL);
 }

@@ -12,7 +12,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <poll.h>
-#include <stdatomic.h>
 #include <pthread.h>
 #include "rtp-demuxer.h"
 #include "rtp-profile.h"
@@ -27,7 +26,7 @@
 
 
 static pthread_t rtp_thread;
-static atomic_int running = 0;
+static volatile bool running = false;
 
 static const char* codec_type_name(codec_type_t codec)
 {
@@ -125,7 +124,15 @@ static int main_rtp_cb(void* param, const void* packet, int bytes, uint32_t time
 // Stub for HW encoder initialization
 void encoder_hw_init(struct config_t *ctx)
 {
-    printf("[ ENCODER INIT ] HW encoder will be initialized for codec: %s\n", codec_type_name(ctx->codec));
+    if (!ctx) {
+        printf("[ ENCODER INIT ] Invalid context for encoder initialization\n");
+        return;
+    }
+    if (ctx->codec == CODEC_UNKNOWN) {
+        printf("[ ENCODER INIT ] Cannot initialize encoder: unknown codec\n");
+        return;
+    }
+    printf("[ ENCODER INIT ] HW/SW encoder will be initialized for codec: %s\n", codec_type_name(ctx->codec));
     // TODO: Place HW encoder initialization here (e.g., MPP/VPU)
 
     decoder_start(ctx);
@@ -187,7 +194,10 @@ static void* rtp_receiver_thread(void *arg)
 
     if (detected_codec == CODEC_UNKNOWN) {
         fprintf(stderr, "[ RTP ] Failed to detect codec from RTP stream!\n");
-        close(sock);
+        if (sock > 0) {
+            close(sock);
+        }
+        rtp_receiver_stop();
         return NULL;
     }
 
@@ -221,7 +231,7 @@ static void* rtp_receiver_thread(void *arg)
     }
 
     // packet reception loop
-    while (atomic_load(&running)) {
+    while (running) {
         int ret = poll(fds, 1, 1000);
         if (ret < 0) { if (errno == EINTR) continue; perror("poll"); break; }
         if (ret == 0) continue;
@@ -237,27 +247,27 @@ static void* rtp_receiver_thread(void *arg)
 
     printf("[ RTP ] Exiting RTP receiver thread\n");
 
-    atomic_store(&running, 0);
-
     return NULL;
 }
 
 int rtp_receiver_start(struct config_t *cfg)
 {
-    int expected = 0;
-    if (!atomic_compare_exchange_strong(&running, &expected, 1)) {
+    if (running) {
         printf("[ RTP ] Already running RTP receiver thread\n");
         return -1;
     }
+    running = true;
     return pthread_create(&rtp_thread, NULL, rtp_receiver_thread, cfg);
 }
 
 void rtp_receiver_stop(void)
 {
-    if (!atomic_load(&running))
+    if (!running) {
+        printf("[ RTP ] RTP receiver thread not running\n");
         return;
+    }
 
-    atomic_store(&running, 0);
+    running = false;
     pthread_join(rtp_thread, NULL);
 
     decoder_stop();

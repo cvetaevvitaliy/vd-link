@@ -6,10 +6,14 @@
 #define UI_H
 #include "lvgl/lvgl.h"
 
+#define LVGL_BUFF_WIDTH 1280
+#define LVGL_BUFF_HEIGHT 720
+
 LV_FONT_DECLARE(montserrat_cyrillic_14);
 LV_FONT_DECLARE(montserrat_cyrillic_16);
 LV_FONT_DECLARE(montserrat_cyrillic_18);
 LV_FONT_DECLARE(montserrat_cyrillic_20);
+LV_FONT_DECLARE(montserrat_cyrillic_medium_20);
 LV_FONT_DECLARE(montserrat_cyrillic_22);
 LV_FONT_DECLARE(montserrat_cyrillic_24);
 LV_FONT_DECLARE(montserrat_cyrillic_26);
@@ -24,6 +28,7 @@ LV_FONT_DECLARE(montserrat_cyrillic_42);
 LV_FONT_DECLARE(montserrat_cyrillic_48);
 
 int ui_init(void);
+void ui_set_fps(float fps);
 void ui_deinit(void);
 
 #endif //UI_H
