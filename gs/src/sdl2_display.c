@@ -51,7 +51,7 @@ typedef struct {
     SDL_mutex    *osd_lock;
     bool          osd_dirty;
 
-    bool          quit;
+    volatile bool      quit;
 
     /* fullscreen toggle state */
     bool          fullscreen;
@@ -86,12 +86,20 @@ static void sdl2_recreate_video_texture_if_needed(int width, int height)
         g_sdl.video_tex_h = 0;
     }
 
-    g_sdl.video_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_IYUV, /* planar YUV420 */
-                                        SDL_TEXTUREACCESS_STREAMING, width, height);
+    g_sdl.video_tex = SDL_CreateTexture(g_sdl.renderer,
+                                        SDL_PIXELFORMAT_IYUV, /* planar YUV420 */
+                                        SDL_TEXTUREACCESS_STREAMING,
+                                        width,
+                                        height);
     if (!g_sdl.video_tex) {
         fprintf(stderr, "SDL_CreateTexture(video) failed: %s\n", SDL_GetError());
         return;
     }
+
+#if SDL_VERSION_ATLEAST(2,0,12)
+    /* Enable high quality scaling for video texture */
+    SDL_SetTextureScaleMode(g_sdl.video_tex, SDL_ScaleModeBest);
+#endif
 
     g_sdl.video_tex_w = width;
     g_sdl.video_tex_h = height;
@@ -173,6 +181,9 @@ int sdl2_display_init(struct config_t *cfg)
         return -1;
     }
 
+    /* Enable high quality scaling globally (for fullscreen / resize) */
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");  /* "0"=nearest, "1"=linear, "2"=best */
+
     g_video.lock = SDL_CreateMutex();
     if (!g_video.lock) {
         fprintf(stderr, "SDL_CreateMutex(video.lock) failed: %s\n", SDL_GetError());
@@ -202,8 +213,7 @@ int sdl2_display_init(struct config_t *cfg)
     }
 
     /* Initial video texture (default size); will be recreated on first real frame */
-    g_sdl.video_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING,
-                                        INITIAL_WIDTH, INITIAL_HEIGHT);
+    g_sdl.video_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, INITIAL_WIDTH, INITIAL_HEIGHT);
     if (!g_sdl.video_tex) {
         fprintf(stderr, "SDL_CreateTexture(video) failed: %s\n", SDL_GetError());
         SDL_DestroyRenderer(g_sdl.renderer);
@@ -214,6 +224,11 @@ int sdl2_display_init(struct config_t *cfg)
     }
     g_sdl.video_tex_w = INITIAL_WIDTH;
     g_sdl.video_tex_h = INITIAL_HEIGHT;
+
+#if SDL_VERSION_ATLEAST(2,0,12)
+    /* Enable high quality scaling for initial video texture */
+    SDL_SetTextureScaleMode(g_sdl.video_tex, SDL_ScaleModeBest);
+#endif
 
     /* Create default black YUV frame so we have black background before real video */
     g_video.width = INITIAL_WIDTH;
@@ -256,8 +271,7 @@ int sdl2_display_init(struct config_t *cfg)
     g_sdl.overlay_buf_w = INITIAL_WIDTH;
     g_sdl.overlay_buf_h = INITIAL_HEIGHT;
 
-    g_sdl.overlay_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                                          g_sdl.overlay_tex_w, g_sdl.overlay_tex_h);
+    g_sdl.overlay_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, g_sdl.overlay_tex_w, g_sdl.overlay_tex_h);
     if (!g_sdl.overlay_tex) {
         fprintf(stderr, "SDL_CreateTexture(overlay) failed: %s\n", SDL_GetError());
         SDL_DestroyTexture(g_sdl.video_tex);
@@ -270,7 +284,13 @@ int sdl2_display_init(struct config_t *cfg)
 
     SDL_SetTextureBlendMode(g_sdl.overlay_tex, SDL_BLENDMODE_BLEND);
 
-    g_sdl.overlay_buffer = (uint32_t*)malloc((size_t)g_sdl.overlay_buf_w * g_sdl.overlay_buf_h * 4);
+#if SDL_VERSION_ATLEAST(2,0,12)
+    /* High quality scaling for overlay texture (LVGL+OSD) */
+    SDL_SetTextureScaleMode(g_sdl.overlay_tex, SDL_ScaleModeBest);
+#endif
+
+    g_sdl.overlay_buffer = (uint32_t*)malloc((size_t)g_sdl.overlay_buf_w *
+                                             g_sdl.overlay_buf_h * 4);
     if (!g_sdl.overlay_buffer) {
         fprintf(stderr, "malloc overlay_buffer failed\n");
         SDL_DestroyTexture(g_sdl.overlay_tex);
@@ -313,6 +333,9 @@ int sdl2_display_init(struct config_t *cfg)
 
 int sdl2_display_deinit(void)
 {
+    if (g_sdl.quit) {
+        printf("[ SDL2 ] Not running, nothing to stop\n");
+    }
     g_sdl.quit = true;
 
     if (g_sdl.osd_lock) {
@@ -372,12 +395,15 @@ void sdl2_set_osd_frame_done_callback(drm_osd_frame_done_cb_t cb)
     g_sdl.osd_done_cb = cb;
 }
 
-/* frame pushers (thread-safe)*/
+/* frame pushers (thread-safe) */
 int sdl2_push_new_video_frame(const uint8_t *y, const uint8_t *u, const uint8_t *v,
                               int width, int height,
                               int y_stride, int uv_stride)
 {
-    if (!g_video.lock || !y || !u || !v || width <= 0 || height <= 0 || y_stride <= 0 || uv_stride <= 0)
+    if (g_sdl.quit ||
+        !g_video.lock || !y || !u || !v ||
+        width <= 0 || height <= 0 ||
+        y_stride <= 0 || uv_stride <= 0)
         return -1;
 
     SDL_LockMutex(g_video.lock);
@@ -434,7 +460,7 @@ int sdl2_push_new_video_frame(const uint8_t *y, const uint8_t *u, const uint8_t 
  */
 int sdl2_push_new_osd_frame(const void *src_addr, int width, int height)
 {
-    if (!g_sdl.overlay_buffer || !g_sdl.osd_lock)
+    if (!g_sdl.overlay_buffer || !g_sdl.osd_lock || g_sdl.quit)
         return -1;
 
     if (!src_addr || width <= 0 || height <= 0)
@@ -465,11 +491,10 @@ int sdl2_push_new_osd_frame(const void *src_addr, int width, int height)
     return 0;
 }
 
-
 /* poll/render (must be called from main thread) */
 int sdl2_display_poll(void)
 {
-    if (!g_sdl.window || !g_sdl.renderer)
+    if (!g_sdl.window || !g_sdl.renderer || g_sdl.quit)
         return -1;
 
     /* Handle events (close window, resize, ESC, double click) */
@@ -477,14 +502,14 @@ int sdl2_display_poll(void)
     while (SDL_PollEvent(&ev)) {
         if (ev.type == SDL_QUIT) {
             g_sdl.quit = true;
+            return -1;
         } else if (ev.type == SDL_WINDOWEVENT &&
                    ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
             g_sdl.win_w = ev.window.data1;
             g_sdl.win_h = ev.window.data2;
-        } else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) {
-            //g_sdl.quit = true;
-            //g_sdl.fullscreen = false;
-            //sdl2_toggle_fullscreen();
+        } else if (ev.type == SDL_KEYDOWN &&
+                   ev.key.keysym.sym == SDLK_ESCAPE) {
+            /* You may want to toggle fullscreen on ESC or ignore. */
         } else if (ev.type == SDL_MOUSEBUTTONDOWN &&
                    ev.button.button == SDL_BUTTON_LEFT &&
                    ev.button.clicks == 2) {
@@ -570,8 +595,6 @@ int sdl2_display_poll(void)
     if (g_sdl.osd_done_cb) {
         g_sdl.osd_done_cb();
     }
-
-    SDL_Delay(4); /* prevent 100% CPU */
 
     return 0;
 }

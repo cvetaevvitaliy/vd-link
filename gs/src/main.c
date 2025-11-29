@@ -32,15 +32,6 @@ static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
     running = 0;
-    ui_deinit();
-    msp_osd_stop();
-    rtp_receiver_stop();
-#ifdef PLATFORM_ROCKCHIP
-    drm_close();
-#endif
-#ifdef PLATFORM_DESKTOP
-    sdl2_display_deinit();
-#endif
 }
 
 static void setup_signals(void)
@@ -143,26 +134,41 @@ int main(int argc, char* argv[])
     drm_init("/dev/dri/card0", &config);
 #endif
 #ifdef PLATFORM_DESKTOP
-    sdl2_display_init(&config);
+    if (sdl2_display_init(&config) < 0) {
+        fprintf(stderr, "SDL2 display initialization failed\n");
+        return -1;
+    }
 #endif
 
-    msp_osd_init(&config);
-
     rtp_receiver_start(&config);
+
+    msp_osd_init(&config);
 
     ui_init();
 
     while (running) {
 #ifdef PLATFORM_DESKTOP
         if (sdl2_display_poll() < 0) {
-            signal_handler(SIGINT);
+            signal_handler(SIGINT); // sdl2 should quit
+            break;
         }
+        usleep(1000); // Sleep for 1 ms prevent 100% CPU */
 #endif
 
 #ifdef PLATFORM_ROCKCHIP
         usleep(100000); // Sleep for 100 ms
 #endif
     }
+
+    msp_osd_stop();
+    ui_deinit();
+    rtp_receiver_stop();
+#ifdef PLATFORM_ROCKCHIP
+    drm_close();
+#endif
+#ifdef PLATFORM_DESKTOP
+    sdl2_display_deinit();
+#endif
 
     return 0;
 }

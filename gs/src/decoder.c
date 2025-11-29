@@ -22,6 +22,7 @@
 #include <drm/drm_fourcc.h>
 #include <linux/dma-buf.h>
 #include "src/drm_display.h"
+#include "ui/ui.h"
 
 #define DECODER_DEBUG 0
 
@@ -282,8 +283,9 @@ static void* decoder_thread_func(void* arg)
                 // Check if 1 second has passed
                 if (now - last_fps_time >= 1000) {
                     current_fps = frames_in_sec * 1000.0 / (now - last_fps_time);
-#if DECODER_DEBUG
+#if 1
                     printf("[ DECODER ] FPS: %.2f\n", current_fps);
+                    ui_set_fps(current_fps);
 #endif
                     frames_in_sec = 0;
                     last_fps_time = now;

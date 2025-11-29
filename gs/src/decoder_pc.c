@@ -10,13 +10,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdatomic.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <string.h>
 #include <time.h>
 
 /* FFmpeg */
+#include "ui/ui.h"
+
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/avutil.h>
@@ -40,17 +41,15 @@ static uint64_t get_time_ms(void)
 static AVCodecContext *g_dec_ctx = NULL;
 static AVFrame        *g_frame   = NULL;
 
-static struct SwsContext *g_sws_ctx          = NULL;
-static enum AVPixelFormat g_sws_src_fmt      = AV_PIX_FMT_NONE;
-static int                g_sws_w            = 0;
-static int                g_sws_h            = 0;
-static uint8_t           *g_sws_buf          = NULL;
-static int                g_sws_buf_size     = 0;
-static uint8_t           *g_sws_dst_data[4]  = {0};
-static int                g_sws_dst_linesize[4] = {0};
+static struct SwsContext *g_sws_ctx             = NULL;
+static enum AVPixelFormat g_sws_src_fmt         = AV_PIX_FMT_NONE;
+static int                g_sws_w               = 0;
+static int                g_sws_h               = 0;
+static uint8_t           *g_sws_dst_data[4]     = { 0 };
+static int                g_sws_dst_linesize[4] = { 0 };
 
 static pthread_t  g_decoder_thread;
-static atomic_int g_decoder_running = 0;
+static volatile bool g_decoder_running = false;
 
 /* ---------------------- packet queue ------------------------ */
 
@@ -74,7 +73,7 @@ static int pkt_queue_push(const void *data, int size)
 
     int next_tail = (g_pkt_tail + 1) % DEC_PKT_QUEUE_SIZE;
     if (next_tail == g_pkt_head) {
-        /* queue full – дропимо найстаріший пакет (low-latency варіант) */
+        /* queue full – drop oldest (low-latency) */
         struct pkt_item *old = &g_pkt_queue[g_pkt_head];
         free(old->data);
         old->data = NULL;
@@ -103,11 +102,11 @@ static int pkt_queue_pop(struct pkt_item *out)
 {
     pthread_mutex_lock(&g_pkt_mutex);
 
-    while (g_pkt_head == g_pkt_tail && atomic_load(&g_decoder_running)) {
+    while (g_pkt_head == g_pkt_tail && g_decoder_running) {
         pthread_cond_wait(&g_pkt_cond, &g_pkt_mutex);
     }
 
-    if (!atomic_load(&g_decoder_running) && g_pkt_head == g_pkt_tail) {
+    if (!g_decoder_running && g_pkt_head == g_pkt_tail) {
         pthread_mutex_unlock(&g_pkt_mutex);
         return -1;
     }
@@ -137,6 +136,24 @@ static void pkt_queue_flush(void)
 
 /* ---------------------- SWS (to YUV420P) -------------------- */
 
+static void sws_cleanup(void)
+{
+    if (g_sws_ctx) {
+        sws_freeContext(g_sws_ctx);
+        g_sws_ctx = NULL;
+    }
+
+    if (g_sws_dst_data[0]) {
+        av_freep(&g_sws_dst_data[0]);  /* one buffer for all planes */
+    }
+    memset(g_sws_dst_data, 0, sizeof(g_sws_dst_data));
+    memset(g_sws_dst_linesize, 0, sizeof(g_sws_dst_linesize));
+
+    g_sws_w       = 0;
+    g_sws_h       = 0;
+    g_sws_src_fmt = AV_PIX_FMT_NONE;
+}
+
 static int ensure_sws(int width, int height, enum AVPixelFormat src_fmt)
 {
     if (g_sws_ctx &&
@@ -146,14 +163,8 @@ static int ensure_sws(int width, int height, enum AVPixelFormat src_fmt)
         return 0;
     }
 
-    if (g_sws_ctx) {
-        sws_freeContext(g_sws_ctx);
-        g_sws_ctx = NULL;
-    }
-    if (g_sws_buf) {
-        av_freep(&g_sws_buf);
-        g_sws_buf_size = 0;
-    }
+    /* re-init */
+    sws_cleanup();
 
     g_sws_ctx = sws_getContext(width, height, src_fmt,
                                width, height, AV_PIX_FMT_YUV420P,
@@ -171,18 +182,35 @@ static int ensure_sws(int width, int height, enum AVPixelFormat src_fmt)
                              1);
     if (ret < 0) {
         printf("[DECODER] av_image_alloc failed: %d\n", ret);
-        sws_freeContext(g_sws_ctx);
-        g_sws_ctx = NULL;
+        sws_cleanup();
         return -1;
     }
 
-    g_sws_buf      = g_sws_dst_data[0];
-    g_sws_buf_size = ret;
     g_sws_w        = width;
     g_sws_h        = height;
     g_sws_src_fmt  = src_fmt;
 
     return 0;
+}
+
+/* ---------------------- decoder cleanup --------------------- */
+
+static void decoder_pc_cleanup(void)
+{
+    /* sws */
+    sws_cleanup();
+
+    /* frame */
+    if (g_frame) {
+        av_frame_free(&g_frame);
+        g_frame = NULL;
+    }
+
+    /* codec context */
+    if (g_dec_ctx) {
+        avcodec_free_context(&g_dec_ctx);
+        g_dec_ctx = NULL;
+    }
 }
 
 /* ---------------------- decoder thread ---------------------- */
@@ -202,7 +230,7 @@ static void *decoder_thread_func(void *arg)
     int      frames_in_sec = 0;
     double   current_fps   = 0.0;
 
-    while (atomic_load(&g_decoder_running)) {
+    while (g_decoder_running) {
         struct pkt_item item = {0};
 
         if (pkt_queue_pop(&item) < 0) {
@@ -257,7 +285,7 @@ static void *decoder_thread_func(void *arg)
             }
 
             if (g_frame->format == AV_PIX_FMT_YUV420P) {
-                /* вже те, що треба */
+                /* already YUV420P */
                 sdl2_push_new_video_frame(
                     g_frame->data[0],
                     g_frame->data[1],
@@ -268,7 +296,7 @@ static void *decoder_thread_func(void *arg)
                     g_frame->linesize[1]
                 );
             } else {
-                /* конвертація в YUV420P */
+                /* convert to YUV420P */
                 if (ensure_sws(width, height, (enum AVPixelFormat)g_frame->format) == 0) {
                     sws_scale(g_sws_ctx,
                               (const uint8_t * const *)g_frame->data,
@@ -300,6 +328,7 @@ static void *decoder_thread_func(void *arg)
                 current_fps = frames_in_sec * 1000.0 / (double)(now - last_fps_time);
 #if 1
                 printf("[DECODER] FPS: %.2f\n", current_fps);
+                ui_set_fps(current_fps);
 #endif
                 frames_in_sec = 0;
                 last_fps_time = now;
@@ -335,7 +364,8 @@ int decoder_start(struct config_t *cfg)
 
     printf("[DECODER] Initializing libavcodec decoder...\n");
 
-    avcodec_register_all();
+    /* mute FFmpeg logs (надокучливі PPS/NALU warnings) */
+    av_log_set_level(AV_LOG_QUIET);
 
     const AVCodec *codec = avcodec_find_decoder(codec_id);
     if (!codec) {
@@ -350,15 +380,14 @@ int decoder_start(struct config_t *cfg)
     }
 
 #ifdef SLOW_PC_MODE
-    g_dec_ctx->thread_count = 4; // limit to 4 threads on slow PCs
-    g_dec_ctx->thread_type  = FF_THREAD_SLICE; // use slice threading
+    g_dec_ctx->thread_count = 4;
+    g_dec_ctx->thread_type  = FF_THREAD_SLICE;
 #else
-    g_dec_ctx->thread_count = 1; // single thread for low-latency
-    g_dec_ctx->thread_type  = 0; // no threading
+    g_dec_ctx->thread_count = 1;
+    g_dec_ctx->thread_type  = 0;
 #endif
 
-    // low-latency hints
-    g_dec_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    g_dec_ctx->flags  |= AV_CODEC_FLAG_LOW_DELAY;
     g_dec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 
     if (avcodec_open2(g_dec_ctx, codec, NULL) < 0) {
@@ -374,17 +403,15 @@ int decoder_start(struct config_t *cfg)
         return -1;
     }
 
-    atomic_store(&g_decoder_running, 1);
+    g_decoder_running = true;
     if (pthread_create(&g_decoder_thread, NULL, decoder_thread_func, NULL) != 0) {
         printf("[DECODER] pthread_create failed\n");
-        atomic_store(&g_decoder_running, 0);
-        av_frame_free(&g_frame);
-        avcodec_free_context(&g_dec_ctx);
+        g_decoder_running = false;
+        decoder_pc_cleanup();
         return -1;
     }
-    
-    printf("[DECODER] libavcodec decoder started\n");
 
+    printf("[DECODER] libavcodec decoder started\n");
     return 0;
 }
 
@@ -394,10 +421,10 @@ int decoder_put_frame(struct config_t *cfg, void *data, int size)
     if (!data || size <= 0)
         return -1;
 
-    if (!g_dec_ctx || !atomic_load(&g_decoder_running)) {
+    if (!g_dec_ctx || !g_decoder_running) {
         return -1;
     }
-    
+
     if (pkt_queue_push(data, size) < 0) {
         printf("[DECODER] pkt_queue_push failed (drop)\n");
         return -1;
@@ -410,10 +437,11 @@ int decoder_stop(void)
 {
     if (!g_dec_ctx) {
         printf("[DECODER] decoder not initialized\n");
+        g_decoder_running = false;
         return -1;
     }
 
-    atomic_store(&g_decoder_running, 0);
+    g_decoder_running = false;
 
     pthread_mutex_lock(&g_pkt_mutex);
     pthread_cond_broadcast(&g_pkt_cond);
@@ -422,25 +450,7 @@ int decoder_stop(void)
     pthread_join(g_decoder_thread, NULL);
     pkt_queue_flush();
 
-    if (g_sws_buf) {
-        av_freep(&g_sws_buf);
-        g_sws_buf_size = 0;
-    }
-    g_sws_dst_data[0] = g_sws_dst_data[1] = g_sws_dst_data[2] = NULL;
-    g_sws_dst_linesize[0] = g_sws_dst_linesize[1] = g_sws_dst_linesize[2] = 0;
-
-    if (g_sws_ctx) {
-        sws_freeContext(g_sws_ctx);
-        g_sws_ctx = NULL;
-    }
-
-    if (g_frame) {
-        av_frame_free(&g_frame);
-    }
-
-    if (g_dec_ctx) {
-        avcodec_free_context(&g_dec_ctx);
-    }
+    decoder_pc_cleanup();
 
     printf("[DECODER] decoder stopped\n");
     return 0;

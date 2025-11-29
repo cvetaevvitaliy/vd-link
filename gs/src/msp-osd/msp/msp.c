@@ -76,7 +76,7 @@ msp_error_e msp_process_data(msp_state_t *msp_state, uint8_t dat)
             msp_state->message.checksum = dat;
             msp_state->message.size = dat;
             msp_state->state = MSP_CMD;
-            if (msp_state->message.size > 256)
+            if (msp_state->message.size > (uint8_t)256)
             { // bogus message, too big. this can't actually happen but good to check
                 msp_state->state = MSP_IDLE;
                 return MSP_ERR_LEN;

@@ -25,16 +25,15 @@
 
 #include <string.h>
 #include <unistd.h>
-
-#define LVGL_BUFF_WIDTH 1280
-#define LVGL_BUFF_HEIGHT 720
+#include "screens/screens.h"
 
 static void *lvgl_buf1 = NULL;
 static void *lvgl_buf2 = NULL;
 static lv_display_t *disp = NULL;
 static pthread_t tick_tid;
-static int tick_running = 1;
+static volatile bool tick_running = false;
 static void *fb_addr = NULL;
+static pthread_mutex_t lvgl_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef PLATFORM_DESKTOP
 static void blend_rgba8888_src_over(const uint32_t *src, uint32_t *dst, int width, int height)
@@ -85,14 +84,16 @@ static void *tick_thread(void *arg)
     struct timespec prev, now;
     clock_gettime(CLOCK_MONOTONIC, &prev);
 
-    while (atomic_load(&tick_running)) {
+    while (tick_running) {
         clock_gettime(CLOCK_MONOTONIC, &now);
+        pthread_mutex_lock(&lvgl_mutex);
         int ms = (int)(now.tv_sec - prev.tv_sec) * 1000 + (now.tv_nsec - prev.tv_nsec) / 1000000;
         if (ms > 0) {
             lv_tick_inc(ms);
             prev = now;
         }
         lv_timer_handler();
+        pthread_mutex_unlock(&lvgl_mutex);
         usleep(1000);
     }
 
@@ -102,6 +103,7 @@ static void *tick_thread(void *arg)
 
 static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map_u8)
 {
+    if (!tick_running) return;
    //printf("[ UI ] Flush callback called for area: (%d, %d) - (%d, %d)\n", area->x1, area->y1, area->x2, area->y2);
 
     if (fb_addr == NULL) {
@@ -182,19 +184,21 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
     // osd_buf and fb_addr same RGBA8888/BGRA8888 size!!!
     blend_rgba8888_src_over((const uint32_t *)osd_buf, (uint32_t *)fb_addr,LVGL_BUFF_WIDTH,LVGL_BUFF_HEIGHT);
     sdl2_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
+    lv_display_flush_ready(disp); // thread safe call
 #endif
 }
 
 void drm_osd_frame_done_cb(void)
 {
+#ifdef PLATFORM_ROCKCHIP
     lv_display_flush_ready(disp);
+#endif
 }
 
 int ui_init(void)
 {
+    pthread_mutex_lock(&lvgl_mutex);
     lv_init();
-
-    atomic_store(&tick_running, 1);
 
     int width = LVGL_BUFF_WIDTH;
     int height = LVGL_BUFF_HEIGHT;
@@ -226,6 +230,7 @@ int ui_init(void)
     printf("[ UI ] Initialized LVGL display with size %dx%d\n", LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
 
     lv_display_set_flush_cb(disp, ui_flush_cb);
+    pthread_mutex_unlock(&lvgl_mutex);
 #ifdef PLATFORM_ROCKCHIP
     drm_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 #endif
@@ -234,6 +239,7 @@ int ui_init(void)
     sdl2_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 #endif
 
+    tick_running = true;
     pthread_create(&tick_tid, NULL, tick_thread, NULL);
 
     //lang_set_english();
@@ -246,9 +252,11 @@ int ui_init(void)
     lv_style_set_bg_opa(&style_transp_bg, LV_OPA_TRANSP);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED);
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_20, LV_STYLE_STATE_CMP_SAME);
+    lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_medium_20, LV_STYLE_STATE_CMP_SAME);
     lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
 
+    screens_init();
+#if 0
     lv_obj_t *black_square = lv_obj_create(lv_scr_act());
     lv_obj_set_size(black_square, 170, 60);
     lv_obj_align(black_square, LV_ALIGN_BOTTOM_MID, 0, -52);
@@ -278,23 +286,57 @@ int ui_init(void)
     lv_obj_align(blue_square, LV_ALIGN_BOTTOM_MID, 60, 0);
     lv_obj_set_style_bg_color(blue_square, lv_color_make(0, 0, 255), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(blue_square, 128, LV_PART_MAIN);
-
+#endif
     return 0;
+}
+
+// For test
+static lv_obj_t *label_fps;
+void ui_set_fps(float fps)
+{
+    pthread_mutex_lock(&lvgl_mutex);
+    if (label_fps) {
+        static char buf[32];
+        snprintf(buf, sizeof(buf), "FPS: %.1f", fps);
+        lv_label_set_text(label_fps, buf);
+    } else {
+        label_fps = lv_label_create(lv_scr_act());
+        lv_obj_align(label_fps, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+        static char buf[32];
+        snprintf(buf, sizeof(buf), "FPS: %.1f", fps);
+        lv_label_set_text(label_fps, buf);
+    }
+    pthread_mutex_unlock(&lvgl_mutex);
 }
 
 void ui_deinit(void)
 {
-    atomic_store(&tick_running, 0);
+    if (!tick_running) {
+        printf("[ UI ] Not running, nothing to stop\n");
+        return;
+    }
+    pthread_mutex_lock(&lvgl_mutex);
+    if (lv_is_initialized()) {
+        lv_deinit();
+    }
+    pthread_mutex_unlock(&lvgl_mutex);
+
+    tick_running = false;
     pthread_join(tick_tid, NULL);
+    pthread_mutex_destroy(&lvgl_mutex);
 
-    if (lvgl_buf1)
+    if (lvgl_buf1) {
         free(lvgl_buf1);
-    if (lvgl_buf2)
+        lvgl_buf1 = NULL;
+    }
+    if (lvgl_buf2) {
         free(lvgl_buf2);
+        lvgl_buf2 = NULL;
+    }
 
-    lv_deinit();
     if (fb_addr) {
         free(fb_addr);
         fb_addr = NULL;
     }
+
 }
