@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 2.8...3.13)
+# TARGET = rk3566 | desktop
+set(TARGET "rk3566" CACHE STRING "Build target (rk3566|desktop)")
+set(SLOW_PC_MODE OFF CACHE BOOL "Enable slow PC mode (for low-end PCs)")
+set(WFB_STATUS_LINK OFF CACHE BOOL "Enable WFB status link")
+message(STATUS "Build TARGET: ${TARGET}")
 project(vd-link-${PLATFORM} C)
 
 set(CMAKE_C_FLAGS_DEBUG "-O1 -g3")
@@ -27,10 +32,29 @@ message(STATUS "LVGL version: ${LVGL_VERSION}")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
-pkg_check_modules(LIBRGA REQUIRED IMPORTED_TARGET librga)
-pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
-pkg_check_modules(ROCKCHIPMPP REQUIRED IMPORTED_TARGET rockchip_mpp)
-pkg_check_modules(MSGPACK REQUIRED IMPORTED_TARGET msgpack)
+
+if("${TARGET}" STREQUAL "rk3566")
+    pkg_check_modules(LIBRGA     REQUIRED IMPORTED_TARGET librga)
+    pkg_check_modules(LIBDRM     REQUIRED IMPORTED_TARGET libdrm)
+    pkg_check_modules(ROCKCHIPMPP REQUIRED IMPORTED_TARGET rockchip_mpp)
+    pkg_check_modules(MSGPACK    REQUIRED IMPORTED_TARGET msgpack)
+    add_definitions(-DPLATFORM_ROCKCHIP=1)
+    message(STATUS "Building for rk3566 with DRM/RGA/MPP")
+elseif ("${TARGET}" STREQUAL "desktop")
+    pkg_check_modules(SDL2    REQUIRED IMPORTED_TARGET sdl2)
+    pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
+    pkg_check_modules(AVUTIL  REQUIRED IMPORTED_TARGET libavutil)
+    pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+    add_definitions(-DPLATFORM_DESKTOP=1)
+    message(STATUS "Building for desktop with SDL2 + FFmpeg (libavcodec/libavutil/libswscale)")
+
+    if (SLOW_PC_MODE)
+        add_definitions(-DSLOW_PC_MODE=1)
+        message(STATUS "Enabling multi thread decoding SLOW_PC_MODE libavcodec optimizations")
+    endif()
+else()
+    message(FATAL_ERROR "Unknown TARGET: ${TARGET}. Must be 'rk3566' or 'desktop'")
+endif()
 
 message(STATUS "ZLIB_INCLUDE_DIRS: ${ZLIB_INCLUDE_DIRS}")
 message(STATUS "ZLIB_LIBRARIES: ${ZLIB_LIBRARIES}")
@@ -42,6 +66,12 @@ message(STATUS "ROCKCHIPMPP_INCLUDE_DIRS: ${ROCKCHIPMPP_INCLUDE_DIRS}")
 message(STATUS "ROCKCHIPMPP_LIBRARIES: ${ROCKCHIPMPP_LIBRARIES}")
 message(STATUS "ROCKCHIPMPP_VERSION: ${ROCKCHIPMPP_VERSION}")
 message(STATUS "MSGPACK_INCLUDE_DIRS: ${MSGPACK_INCLUDE_DIRS}")
+
+if("${TARGET}" STREQUAL "desktop")
+    message(STATUS "AVCODEC_INCLUDE_DIRS: ${AVCODEC_INCLUDE_DIRS}")
+    message(STATUS "AVUTIL_INCLUDE_DIRS:  ${AVUTIL_INCLUDE_DIRS}")
+    message(STATUS "SWSCALE_INCLUDE_DIRS: ${SWSCALE_INCLUDE_DIRS}")
+endif()
 
 include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -56,9 +86,24 @@ include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/msp-osd
 )
 
+
+if("${TARGET}" STREQUAL "desktop")
+    include_directories(
+            ${AVCODEC_INCLUDE_DIRS}
+            ${AVUTIL_INCLUDE_DIRS}
+            ${SWSCALE_INCLUDE_DIRS})
+endif()
+
+set(SRC_COMMON
+        src/main.c
+        src/rtp_receiver.c
+        src/msp-osd.c
+)
+
 set(MSP_OSD_SRC
         src/msp-osd/fakehd/fakehd.c
         src/msp-osd/font/font.c
+        src/msp-osd/font/unicode_utils.c
         src/msp-osd/json/osd_config.c
         src/msp-osd/json/parson.c
         src/msp-osd/libspng/spng.c
@@ -93,24 +138,55 @@ set(MSP_OSD_SRC
         src/ui/lang/lang.c
 )
 
+if("${TARGET}" STREQUAL "rk3566")
+    list(APPEND SRC_COMMON
+            src/drm_display.c
+            src/decoder.c)
+elseif ("${TARGET}" STREQUAL "desktop")
+    list(APPEND SRC_COMMON
+            src/sdl2_display.c
+            src/decoder_pc.c)
+endif()
+
+
+if (WFB_STATUS_LINK)
+    set(WFB_STATUS_LINK_SRC
+            src/wfb_status_link.c)
+    add_definitions(-DWFB_STATUS_LINK=1)
+    message(STATUS "Enabling WFB status link feature")
+endif()
+
 add_executable(${PROJECT_NAME}
+        ${SRC_COMMON}
         ${MSP_OSD_SRC}
-        src/main.c
-        src/drm_display.c
-        src/rtp_receiver.c
-        src/decoder.c
-        src/msp-osd.c
-        src/wfb_status_link.c
+        ${WFB_STATUS_LINK_SRC}
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE m rtp lvgl
-        ${ROCKCHIPMPP_LIBRARIES}
-        ${LIBDRM_LIBRARIES}
-        ${LIBRGA_LIBRARIES}
+set(COMMON_LIBS
+        m
+        rtp
+        lvgl
         ${ZLIB_LIBRARIES}
         ${MSGPACK_LIBRARIES}
 )
 
+if("${TARGET}" STREQUAL "rk3566")
+    list(APPEND COMMON_LIBS
+            ${ROCKCHIPMPP_LIBRARIES}
+            ${LIBDRM_LIBRARIES}
+            ${LIBRGA_LIBRARIES}
+    )
+elseif ("${TARGET}" STREQUAL "desktop")
+    list(APPEND COMMON_LIBS
+            pthread
+            PkgConfig::SDL2
+            PkgConfig::AVCODEC
+            PkgConfig::AVUTIL
+            PkgConfig::SWSCALE
+    )
+endif()
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
 ###########################################################################
 # install step

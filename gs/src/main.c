@@ -12,10 +12,19 @@
 #include <getopt.h>
 #include "src/rtp_receiver.h"
 #include "src/common.h"
-#include "src/drm_display.h"
 #include "msp-osd.h"
+#ifdef WFB_STATUS_LINK
 #include "wfb_status_link.h"
+#endif
 #include "ui/ui.h"
+
+#ifdef PLATFORM_DESKTOP
+#include "sdl2_display.h"
+#endif
+
+#ifdef PLATFORM_ROCKCHIP
+#include "src/drm_display.h"
+#endif
 
 static volatile int running = 1;
 
@@ -26,7 +35,12 @@ static void signal_handler(int sig)
     ui_deinit();
     msp_osd_stop();
     rtp_receiver_stop();
+#ifdef PLATFORM_ROCKCHIP
     drm_close();
+#endif
+#ifdef PLATFORM_DESKTOP
+    sdl2_display_deinit();
+#endif
 }
 
 static void setup_signals(void)
@@ -60,7 +74,9 @@ static void print_usage(const char* prog)
     printf("Options:\n");
     printf("  --ip <address>   Set the IP address to listen on (default: 0.0.0.0)\n");
     printf("  --port <number>  Set the port to listen for RTP stream (default: 5602)\n");
+#ifdef WFB_STATUS_LINK
     printf("  --wfb            Set the port to listen for wfb-server link status (default: 8003)\n");
+#endif
     printf("Defaults: --ip 0.0.0.0 --port 5602 --wfb 8003\n");
 }
 
@@ -69,7 +85,9 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
     static struct option long_options[] = {
             {"ip", required_argument, 0, 'i'},
             {"port", required_argument, 0, 'p'},
+#ifdef WFB_STATUS_LINK
             {"wfb", required_argument, 0, 'w'},
+#endif
             {"help", no_argument, 0, 'h'},
             {0, 0, 0, 0}
     };
@@ -88,6 +106,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
             }
             config->port = port;
         } break;
+#ifdef WFB_STATUS_LINK
         case 'w': {
             int port = atoi(optarg);
             if (port < 1 || port > 65535 || config->port == port) {
@@ -96,6 +115,7 @@ static void parse_args(int argc, char* argv[], struct config_t* config)
             }
             config->wfb_port = port;
         } break;
+#endif
         case 'h':
         default:
             print_usage(argv[0]);
@@ -119,7 +139,12 @@ int main(int argc, char* argv[])
 
     setup_signals();
 
+#ifdef PLATFORM_ROCKCHIP
     drm_init("/dev/dri/card0", &config);
+#endif
+#ifdef PLATFORM_DESKTOP
+    sdl2_display_init(&config);
+#endif
 
     msp_osd_init(&config);
 
@@ -128,7 +153,15 @@ int main(int argc, char* argv[])
     ui_init();
 
     while (running) {
+#ifdef PLATFORM_DESKTOP
+        if (sdl2_display_poll() < 0) {
+            signal_handler(SIGINT);
+        }
+#endif
+
+#ifdef PLATFORM_ROCKCHIP
         usleep(100000); // Sleep for 100 ms
+#endif
     }
 
     return 0;

@@ -15,8 +15,15 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include "rtp-demuxer.h"
-#include "decoder.h"
 #include "rtp-profile.h"
+
+#ifdef PLATFORM_ROCKCHIP
+#include "decoder.h"
+#endif
+
+#ifdef PLATFORM_DESKTOP
+#include "decoder_pc.h"
+#endif
 
 
 static pthread_t rtp_thread;

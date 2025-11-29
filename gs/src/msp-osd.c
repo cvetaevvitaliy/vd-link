@@ -19,8 +19,12 @@
 #include "msp/msp_displayport.h"
 #include "util/debug.h"
 #include "net/data_protocol.h"
+#ifdef PLATFORM_ROCKCHIP
 #include "drm_display.h"
+#endif
+#ifdef WFB_STATUS_LINK
 #include "wfb_status_link.h"
+#endif
 #include "font/font.h"
 #include "toast/toast.h"
 #include "fakehd/fakehd.h"
@@ -296,6 +300,7 @@ void fill_character_map_with_charset(uint16_t character_map[MAX_DISPLAY_X][MAX_D
     }
 }
 
+#ifdef WFB_STATUS_LINK
 #define CHAR_LINK_LQ "\x7B"
 #define CHAR_LINK_BW "\x70"
 void wfb_status_link_callback(const wfb_rx_status *st)
@@ -332,6 +337,7 @@ void wfb_status_link_callback(const wfb_rx_status *st)
     }
 #endif
 }
+#endif
 
 static void need_render_display(void)
 {
@@ -381,13 +387,14 @@ static void* msp_osd_thread(void *arg)
 
     start_display();
     usleep(100000);
-
+#ifdef WFB_STATUS_LINK
     wfb_status_link_start(cfg->ip, cfg->wfb_port, wfb_status_link_callback);
+#endif
 
 #if 0    // test all characters
     uint8_t c = 0;
-    for (int j = 0; j < MSP_OVERLAY_Y; ++j) {
-        for (int i = 0; i < MSP_OVERLAY_X; ++i) {
+    for (int j = 0; j < MAX_DISPLAY_Y; ++j) {
+        for (int i = 0; i < MAX_DISPLAY_X; ++i) {
             msp_draw_character(i, j,c);
             c++;
             if (c > 255)
@@ -404,8 +411,9 @@ static void* msp_osd_thread(void *arg)
         }
         usleep(16000); // Simulate 60 FPS
     }
-
+#ifdef WFB_STATUS_LINK
     wfb_status_link_stop();
+#endif
 
     free(display_driver);
     free(msp_state);

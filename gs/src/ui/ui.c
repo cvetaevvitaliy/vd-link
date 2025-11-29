@@ -8,13 +8,20 @@
 #include <stdatomic.h>
 #include <time.h>
 #include "ui.h"
-#include "drm_display.h"
 #include "msp-osd.h"
 #include "lang/lang.h"
 #include "lvgl/lvgl.h"
+
+#ifdef PLATFORM_DESKTOP
+#include "sdl2_display.h"
+#endif
+
+#ifdef PLATFORM_ROCKCHIP
+#include "drm_display.h"
 #include <rga/im2d_buffer.h>
 #include <rga/im2d_single.h>
 #include <rga/rga.h>
+#endif
 
 #include <string.h>
 #include <unistd.h>
@@ -28,6 +35,48 @@ static lv_display_t *disp = NULL;
 static pthread_t tick_tid;
 static int tick_running = 1;
 static void *fb_addr = NULL;
+
+#ifdef PLATFORM_DESKTOP
+static void blend_rgba8888_src_over(const uint32_t *src, uint32_t *dst, int width, int height)
+{
+    int count = width * height;
+
+    for (int i = 0; i < count; ++i) {
+        uint32_t s = src[i];
+        uint32_t d = dst[i];
+
+        uint8_t sa = (uint8_t)(s >> 24);
+        if (sa == 0) {
+            // fully transparent src -> keep dst
+            continue;
+        } else if (sa == 255) {
+            // fully opaque src -> just replace
+            dst[i] = s;
+            continue;
+        }
+
+        uint8_t sr = (uint8_t)(s >> 16);
+        uint8_t sg = (uint8_t)(s >> 8);
+        uint8_t sb = (uint8_t)(s >> 0);
+
+        uint8_t da = (uint8_t)(d >> 24);
+        uint8_t dr = (uint8_t)(d >> 16);
+        uint8_t dg = (uint8_t)(d >> 8);
+        uint8_t db = (uint8_t)(d >> 0);
+
+        uint8_t inv_sa = (uint8_t)(255 - sa);
+
+        // Straight alpha SRC_OVER: out = src + dst * (1 - alpha_src)
+        uint8_t out_r = (uint8_t)((sr * sa + dr * inv_sa + 127) / 255);
+        uint8_t out_g = (uint8_t)((sg * sa + dg * inv_sa + 127) / 255);
+        uint8_t out_b = (uint8_t)((sb * sa + db * inv_sa + 127) / 255);
+        uint8_t out_a = (uint8_t)((sa + (da * inv_sa + 127) / 255));
+
+        dst[i] = ((uint32_t)out_a << 24) | ((uint32_t)out_r << 16) | ((uint32_t)out_g << 8) | ((uint32_t)out_b << 0);
+    }
+}
+#endif
+
 
 static void *tick_thread(void *arg)
 {
@@ -94,7 +143,7 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
             }
         }
     }
-
+#ifdef PLATFORM_ROCKCHIP
     // Squash OSD framebuffer with LVGL framebuffer
     void *osd_buf = msp_osd_get_fb_addr();
     if (osd_buf == NULL) {
@@ -119,6 +168,21 @@ static void ui_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * p
 
     // Push the new squashed frame to DRM
     drm_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
+#endif
+
+#ifdef PLATFORM_DESKTOP
+    // Squash OSD framebuffer with LVGL framebuffer in software
+    void *osd_buf = msp_osd_get_fb_addr();
+    if (osd_buf == NULL) {
+        // No MSP OSD buff - draw only LVGL framebuffer
+        sdl2_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
+        return;
+    }
+
+    // osd_buf and fb_addr same RGBA8888/BGRA8888 size!!!
+    blend_rgba8888_src_over((const uint32_t *)osd_buf, (uint32_t *)fb_addr,LVGL_BUFF_WIDTH,LVGL_BUFF_HEIGHT);
+    sdl2_push_new_osd_frame(fb_addr, LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
+#endif
 }
 
 void drm_osd_frame_done_cb(void)
@@ -131,7 +195,6 @@ int ui_init(void)
     lv_init();
 
     atomic_store(&tick_running, 1);
-    pthread_create(&tick_tid, NULL, tick_thread, NULL);
 
     int width = LVGL_BUFF_WIDTH;
     int height = LVGL_BUFF_HEIGHT;
@@ -163,10 +226,19 @@ int ui_init(void)
     printf("[ UI ] Initialized LVGL display with size %dx%d\n", LVGL_BUFF_WIDTH, LVGL_BUFF_HEIGHT);
 
     lv_display_set_flush_cb(disp, ui_flush_cb);
-
+#ifdef PLATFORM_ROCKCHIP
     drm_set_osd_frame_done_callback(drm_osd_frame_done_cb);
+#endif
 
-    lang_set_english();
+#ifdef PLATFORM_DESKTOP
+    sdl2_set_osd_frame_done_callback(drm_osd_frame_done_cb);
+#endif
+
+    pthread_create(&tick_tid, NULL, tick_thread, NULL);
+
+    //lang_set_english();
+
+    lang_set_ukrainian();
 
     // Create a transparent background style
     static lv_style_t style_transp_bg;
