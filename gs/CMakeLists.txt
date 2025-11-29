@@ -183,10 +183,13 @@ set(MSP_OSD_SRC
         src/msp-osd/util/fs_util.c
         src/ui/fonts/montserrat_cyrillic_14.c
         src/ui/fonts/montserrat_cyrillic_16.c
+        src/ui/fonts/montserrat_cyrillic_medium_16.c
         src/ui/fonts/montserrat_cyrillic_18.c
+        src/ui/fonts/montserrat_cyrillic_medium_18.c
         src/ui/fonts/montserrat_cyrillic_20.c
         src/ui/fonts/montserrat_cyrillic_medium_20.c
         src/ui/fonts/montserrat_cyrillic_22.c
+        src/ui/fonts/montserrat_cyrillic_medium_22.c
         src/ui/fonts/montserrat_cyrillic_24.c
         src/ui/fonts/montserrat_cyrillic_26.c
         src/ui/fonts/montserrat_cyrillic_28.c
