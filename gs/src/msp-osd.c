@@ -42,7 +42,7 @@ static volatile bool running = false;
 static char current_fc_variant[5];
 static msp_state_t msp_state = {0, MSP_IDLE, 0, {0}};
 
-#define SPLASH_STRING "OSD WAITING..."
+#define SPLASH_STRING "MSP OSD WAITING..."
 #define SHUTDOWN_STRING "SHUTTING DOWN..."
 
 #define MAX_DISPLAY_X 53
@@ -245,7 +245,7 @@ static void start_display(void)
     memset(msp_render_character_map, 0, sizeof(msp_render_character_map));
     memset(overlay_character_map, 0, sizeof(overlay_character_map));
 
-    display_print_string(MAX_DISPLAY_X - sizeof(SPLASH_STRING) - 4, MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
+    display_print_string((MAX_DISPLAY_X/2) - (sizeof(SPLASH_STRING)/2), MAX_DISPLAY_Y - 1, SPLASH_STRING, sizeof(SPLASH_STRING));
     msp_draw_complete();
 }
 

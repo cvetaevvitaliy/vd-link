@@ -26,6 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "screens/screens.h"
+#include "lvgl/src/display/lv_display_private.h"
 
 static void *lvgl_buf1 = NULL;
 static void *lvgl_buf2 = NULL;
@@ -34,6 +35,8 @@ static pthread_t tick_tid;
 static volatile bool tick_running = false;
 static void *fb_addr = NULL;
 static pthread_mutex_t lvgl_mutex = PTHREAD_MUTEX_INITIALIZER;
+static float fps = 0;
+static uint32_t server_ping = 0;
 
 #ifdef PLATFORM_DESKTOP
 static void blend_rgba8888_src_over(const uint32_t *src, uint32_t *dst, int width, int height)
@@ -254,6 +257,7 @@ int ui_init(void)
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_medium_20, LV_STYLE_STATE_CMP_SAME);
     lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
+    lv_obj_set_style_text_font(disp->perf_label, &montserrat_cyrillic_medium_16, LV_STYLE_STATE_CMP_SAME);
 
     screens_init();
 #if 0
@@ -290,25 +294,6 @@ int ui_init(void)
     return 0;
 }
 
-// For test
-static lv_obj_t *label_fps;
-void ui_set_fps(float fps)
-{
-    pthread_mutex_lock(&lvgl_mutex);
-    if (label_fps) {
-        static char buf[32];
-        snprintf(buf, sizeof(buf), "FPS: %.1f", fps);
-        lv_label_set_text(label_fps, buf);
-    } else {
-        label_fps = lv_label_create(lv_scr_act());
-        lv_obj_align(label_fps, LV_ALIGN_BOTTOM_LEFT, 10, -10);
-        static char buf[32];
-        snprintf(buf, sizeof(buf), "FPS: %.1f", fps);
-        lv_label_set_text(label_fps, buf);
-    }
-    pthread_mutex_unlock(&lvgl_mutex);
-}
-
 void ui_deinit(void)
 {
     if (!tick_running) {
@@ -339,4 +324,70 @@ void ui_deinit(void)
         fb_addr = NULL;
     }
 
+}
+
+float ui_get_fps(void)
+{
+    return fps;
+}
+
+void ui_set_fps(float data)
+{
+    fps = data;
+}
+
+void ui_set_server_ping(uint32_t data)
+{
+    server_ping = data;
+}
+
+void perf_update_timer_cb(lv_timer_t * t)
+{
+    lv_display_t * disp = lv_timer_get_user_data(t);
+
+    uint32_t LV_SYSMON_GET_IDLE(void);
+
+    lv_sysmon_perf_info_t * info = &disp->perf_sysmon_info;
+    info->calculated.run_cnt++;
+
+    uint32_t time_since_last_report = lv_tick_elaps(info->measured.last_report_timestamp);
+    uint32_t disp_refr_period = LV_DEF_REFR_PERIOD;
+
+    info->calculated.fps = info->measured.refr_interval_sum ? (1000 * info->measured.refr_cnt / time_since_last_report) : 0;
+    info->calculated.fps = LV_MIN(info->calculated.fps,
+                                  1000 / disp_refr_period);
+
+    info->calculated.cpu = 100 - LV_SYSMON_GET_IDLE();
+    info->calculated.refr_avg_time = info->measured.refr_cnt ? (info->measured.refr_elaps_sum / info->measured.refr_cnt) :
+                                     0;
+
+    info->calculated.cpu_avg_total = ((info->calculated.cpu_avg_total * (info->calculated.run_cnt - 1)) +
+                                      info->calculated.cpu) / info->calculated.run_cnt;
+    info->calculated.fps_avg_total = ((info->calculated.fps_avg_total * (info->calculated.run_cnt - 1)) +
+                                      info->calculated.fps) / info->calculated.run_cnt;
+
+    lv_subject_set_pointer(&disp->perf_sysmon_backend.subject, info);
+
+    lv_sysmon_perf_info_t prev_info = *info;
+    lv_memzero(info, sizeof(lv_sysmon_perf_info_t));
+    info->measured.refr_start = prev_info.measured.refr_start;
+    info->calculated.cpu_avg_total = prev_info.calculated.cpu_avg_total;
+    info->calculated.fps_avg_total = prev_info.calculated.fps_avg_total;
+    info->calculated.run_cnt = prev_info.calculated.run_cnt;
+
+    info->measured.last_report_timestamp = lv_tick_get();
+}
+
+void perf_observer_cb(lv_observer_t * observer, lv_subject_t * subject)
+{
+    const lv_sysmon_perf_info_t * perf = lv_subject_get_pointer(subject);
+
+    lv_obj_t * label = lv_observer_get_target(observer);
+
+    lv_label_set_text_fmt(
+        label,
+        "%s: %" LV_PRIu32" FPS UI: %d FPS\n%" LV_PRIu32 "%% CPU\n"
+        "%s: %" LV_PRIu32" ms",
+        lang_get_str(STR_VIDEO), (uint32_t)fps, perf->calculated.fps, perf->calculated.cpu, lang_get_str(STR_SERVER_PING), server_ping
+    );
 }

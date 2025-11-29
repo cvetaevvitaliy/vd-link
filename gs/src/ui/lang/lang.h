@@ -13,6 +13,8 @@ typedef enum {
     STR_STOP,
     STR_BATT,
     STR_STATUS,
+    STR_VIDEO,
+    STR_SERVER_PING,
     STR_COUNT
 } lang_key_t;
 
@@ -24,6 +26,8 @@ static const char *lang_ua[STR_COUNT] = {
     [STR_STOP]      = "Стоп",
     [STR_BATT]      = "Батарея",
     [STR_STATUS]    = "Статус",
+    [STR_VIDEO]     = "Відео",
+    [STR_SERVER_PING] = "Пінг сервера",
 };
 
 // English
@@ -34,6 +38,8 @@ static const char *lang_en[STR_COUNT] = {
     [STR_STOP]      = "Stop",
     [STR_BATT]      = "Battery",
     [STR_STATUS]    = "Status",
+    [STR_VIDEO]     = "Video",
+    [STR_SERVER_PING] = "Server Ping",
 };
 
 void lang_set_ukrainian(void);

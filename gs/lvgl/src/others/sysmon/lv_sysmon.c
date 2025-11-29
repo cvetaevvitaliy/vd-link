@@ -38,8 +38,8 @@
  **********************/
 
 #if LV_USE_PERF_MONITOR
-    static void perf_update_timer_cb(lv_timer_t * t);
-    static void perf_observer_cb(lv_observer_t * observer, lv_subject_t * subject);
+    __attribute__((weak)) void perf_update_timer_cb(lv_timer_t * t);
+    __attribute__((weak)) void perf_observer_cb(lv_observer_t * observer, lv_subject_t * subject);
     static void perf_monitor_disp_event_cb(lv_event_t * e);
 #endif
 
@@ -233,7 +233,7 @@ static void perf_monitor_disp_event_cb(lv_event_t * e)
     }
 }
 
-static void perf_update_timer_cb(lv_timer_t * t)
+__attribute__((weak)) void perf_update_timer_cb(lv_timer_t * t)
 {
     lv_display_t * disp = lv_timer_get_user_data(t);
 
@@ -279,7 +279,7 @@ static void perf_update_timer_cb(lv_timer_t * t)
     info->measured.last_report_timestamp = lv_tick_get();
 }
 
-static void perf_observer_cb(lv_observer_t * observer, lv_subject_t * subject)
+__attribute__((weak)) void perf_observer_cb(lv_observer_t * observer, lv_subject_t * subject)
 {
     const lv_sysmon_perf_info_t * perf = lv_subject_get_pointer(subject);
 
