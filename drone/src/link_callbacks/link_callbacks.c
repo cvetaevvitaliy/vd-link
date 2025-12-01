@@ -13,6 +13,7 @@
 #include "fc_conn/fc_conn.h"
 #include "config/config_parser.h"
 #include "camera/camera_csi.h"
+#include "proxy/proxy.h"
 
 static volatile bool running;
 static pthread_t telemetry_thread;
@@ -27,7 +28,9 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
     switch (sub_cmd_id) {
         case LINK_SUBCMD_SYS_INFO:
             if (cmd_id == LINK_CMD_GET) {
-                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SYS_INFO, NULL, 0);
+                link_sys_info_t sys_info;
+                strncpy(sys_info.variant, get_fc_variant(), sizeof(sys_info.variant));
+                link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SYS_INFO, &sys_info, sizeof(sys_info));
             }
             break;
         case LINK_SUBCMD_WFB_KEY:
@@ -378,6 +381,21 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
                 } else if (reboot_target == 2) {
                     // Reboot vd-link system
                     system("/etc/init.d/S90vd-link restart");
+                }
+            }
+            break;
+        case LINK_SET_GS_IP:
+            printf("Received SET_GS_IP command, size: %zu, %s\n", size, (char*)data);
+            if (cmd_id == LINK_CMD_SET) {
+                if (size >= 7) { // Minimum size for an IP address like "x.x.x.x"
+                    char dst_ip[16] = {0};
+                    memcpy(dst_ip, data, 16);
+                    printf("Setting destination IP to: %s\n", dst_ip);
+                    proxy_setup_tunnels(dst_ip, 5602, 5610, 5611, 5612);
+
+                    link_send_cmd(LINK_CMD_ACK, LINK_SET_GS_IP, dst_ip, strlen(dst_ip));
+                } else {
+                    link_send_cmd(LINK_CMD_NACK, LINK_SET_GS_IP, NULL, 0);
                 }
             }
             break;

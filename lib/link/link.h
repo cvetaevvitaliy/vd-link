@@ -118,11 +118,12 @@ typedef enum {
     LINK_SUBCMD_SATURATION,   /* int32_t saturation */
     LINK_SUBCMD_SHARPNESS,    /* int32_t sharpness */
     LINK_SUBCMD_HDR,          /* uint32_t hdr_enabled */
-    LINK_SUBCMD_MIRROR_FLIP,  /* uint32_t mirror_enabled; uint32_t flip_enabled */
+    LINK_SUBCMD_MIRROR_FLIP,  /* uint32_t b1:0 [flip_enabled | mirror_enabled] */
 
     LINK_SUBCMD_SAVE_PERSISTENT, /* Save current config to persistent storage */
     LINK_SUBCMD_RESTORE_DEFAULT, /* Restore default config from persistent storage */
     LINK_SUBCMD_REBOOT,          /* uint32_t 1: vision, 2: vd-link */
+    LINK_SET_GS_IP,              /* char[16] gs_ip */
     LINK_SUBCMD_LAST
 } link_subcommand_id_t;
 
@@ -184,6 +185,10 @@ typedef struct {
 } link_sys_telemetry_t;
 
 typedef struct {
+    char variant[5];
+} link_sys_info_t;
+
+typedef struct {
     link_packet_header_t header;
     link_sys_telemetry_t telemetry;
 } link_sys_telemetry_pkt_t;
@@ -202,7 +207,9 @@ typedef struct {
 typedef struct {
     link_packet_header_t header;
     uint64_t timestamp;
-    uint8_t pong;
+    uint8_t pong:1; // 0 for ping, 1 for pong
+    uint8_t scan:1; // 1 if this is a scan ping
+    uint8_t reserved:6; // Reserved bits
 } link_ping_pkt_t;
 
 typedef void (*detection_cmd_rx_cb_t)(const link_detection_box_t* results, size_t count);

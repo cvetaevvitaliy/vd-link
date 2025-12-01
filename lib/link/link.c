@@ -174,12 +174,12 @@ static int win32_cond_timedwait(CONDITION_VARIABLE *cond, CRITICAL_SECTION *mute
     }
 }
 #endif
-static int link_send_ping_response(link_ping_pkt_t* ping_pkt);
+static int link_send_ping_response(link_ping_pkt_t* ping_pkt, struct sockaddr_in *received_from_addr);
 static uint64_t get_current_timestamp(void);
 
 static void* link_listener_thread_func(void* arg);
 static void* rtt_check_thread_func(void* arg);
-static int link_process_incoming_data(const char* data, size_t size);
+static int link_process_incoming_data(const char* data, size_t size, struct sockaddr_in *received_from_addr);
 
 static void* rtt_check_thread_func(void* arg)
 {
@@ -236,7 +236,10 @@ static void* link_listener_thread_func(void* arg)
         if (bytes_received < 0) {
 #ifdef _WIN32
             int error = WSAGetLastError();
-            if (error == WSAENOTSOCK || error == WSAEINVAL || error == WSAECONNABORTED) {
+            if (error == WSAETIMEDOUT) {
+                // Timeout is normal, just check run flag and continue
+                continue;
+            } else if (error == WSAENOTSOCK || error == WSAEINVAL || error == WSAECONNABORTED) {
                 // Socket was closed, exit gracefully
                 DEBUG("Socket closed, listener thread exiting");
                 break;
@@ -244,7 +247,10 @@ static void* link_listener_thread_func(void* arg)
                 ERROR("recvfrom failed with error: %d", error);
             }
 #else
-            if (errno == EBADF || errno == ENOTSOCK) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout is normal, just check run flag and continue
+                continue;
+            } else if (errno == EBADF || errno == ENOTSOCK) {
                 // Socket was closed, exit gracefully
                 DEBUG("Socket closed, listener thread exiting");
                 break;
@@ -266,7 +272,7 @@ static void* link_listener_thread_func(void* arg)
             /* keepalive packet */
             continue;
         }
-        link_process_incoming_data(buffer, bytes_received);
+        link_process_incoming_data(buffer, bytes_received, &received_from_addr);
     }
     
     INFO("Listener thread finished");
@@ -277,7 +283,7 @@ static void* link_listener_thread_func(void* arg)
 #endif
 }
 
-static int link_process_incoming_data(const char* data, size_t size)
+static int link_process_incoming_data(const char* data, size_t size, struct sockaddr_in *received_from_addr)
 {
     if (data == NULL || size == 0) {
         ERROR("Received empty data");
@@ -361,7 +367,7 @@ static int link_process_incoming_data(const char* data, size_t size)
                 // DEBUG("Received displayport data");
                 link_msp_displayport_pkt_t* displayport_pkt = (link_msp_displayport_pkt_t*)data;
                 if (link_callbacks.displayport_cb) {
-                    link_callbacks.displayport_cb(displayport_pkt->data, displayport_pkt->header.size);
+                    link_callbacks.displayport_cb((const unsigned char*)displayport_pkt->data, displayport_pkt->header.size);
                 } else {
                     ERROR("No displayport callback registered");
                 }
@@ -381,14 +387,14 @@ static int link_process_incoming_data(const char* data, size_t size)
         case PKT_PING:
             {
                 // Handle ping packet
-                DEBUG("Received ping packet");
+                // DEBUG("Received ping packet");
                 link_ping_pkt_t* ping_pkt = (link_ping_pkt_t*)data;
                 if (ping_pkt->pong) {
                     uint64_t timestamp = get_current_timestamp();
                     link_ctx.link_rtt = timestamp - ping_pkt->timestamp;
                     printf("Link RTT: %u ms\n", link_ctx.link_rtt);
                 } else {
-                    link_send_ping_response(ping_pkt);
+                    link_send_ping_response(ping_pkt, received_from_addr);
                 }
             }
             break;
@@ -461,6 +467,29 @@ int link_init(link_role_t is_gs)
         return -1;
     }
 
+    // Enable broadcast for send socket
+    int broadcast_enable = 1;
+    if (setsockopt(link_ctx.send_sockfd, SOL_SOCKET, SO_BROADCAST, 
+                   (const char*)&broadcast_enable, sizeof(broadcast_enable)) < 0) {
+        PERROR("Failed to enable broadcast on send socket");
+        close(link_ctx.send_sockfd);
+        pthread_cond_destroy(&sync_cmd_ctx.cond);
+        pthread_mutex_destroy(&sync_cmd_ctx.mutex);
+        return -1;
+    }
+
+    // Bind send socket to ensure it uses the correct interface
+    struct sockaddr_in send_bind_addr;
+    memset(&send_bind_addr, 0, sizeof(send_bind_addr));
+    send_bind_addr.sin_family = AF_INET;
+    send_bind_addr.sin_addr.s_addr = INADDR_ANY; // Let system choose, but bind to ensure proper interface selection
+    send_bind_addr.sin_port = 0; // Let system choose port
+    
+    if (bind(link_ctx.send_sockfd, (struct sockaddr*)&send_bind_addr, sizeof(send_bind_addr)) < 0) {
+        DEBUG("Warning: Failed to bind send socket (non-critical)");
+        // This is not critical, continue anyway
+    }
+
     link_ctx.listen_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (link_ctx.listen_sockfd < 0) {
         PERROR("Failed to create listen socket");
@@ -486,6 +515,17 @@ int link_init(link_role_t is_gs)
     } else {
         DEBUG("Listener socket bound to port %d", link_ctx.listener_port);
     }
+
+    // Set receive timeout on listener socket to prevent hanging on recvfrom
+#ifdef _WIN32
+    DWORD timeout = 1000; // 1 second timeout
+    setsockopt(link_ctx.listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    struct timeval tv;
+    tv.tv_sec = 1;  // 1 second timeout
+    tv.tv_usec = 0;
+    setsockopt(link_ctx.listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
 
     // --- Configure and bind sender socket ---
     memset(&link_ctx.sender_addr, 0, sizeof(link_ctx.sender_addr));
@@ -851,6 +891,12 @@ static uint64_t get_current_timestamp(void)
 
 int link_send_ping(void)
 {
+    // Check if socket is valid
+    if (link_ctx.send_sockfd < 0) {
+        ERROR("Failed to send PING packet: socket not initialized");
+        return -1;
+    }
+
     link_ping_pkt_t ping_pkt;
     ping_pkt.header.type = PKT_PING;
     ping_pkt.header.size = sizeof(link_ping_pkt_t) - sizeof(link_packet_header_t);
@@ -860,14 +906,23 @@ int link_send_ping(void)
     ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)&ping_pkt, sizeof(link_packet_header_t) + ping_pkt.header.size, 0,
                           (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
     if (sent < 0) {
+#ifdef _WIN32
+        int error_code = WSAGetLastError();
+        if (error_code == WSAEACCES) {
+            ERROR("Failed to send PING packet: Permission denied. Try running as Administrator or check Windows Firewall settings");
+        } else {
+            PERROR("Failed to send PING packet");
+        }
+#else
         PERROR("Failed to send PING packet");
+#endif
         return -1;
     }
 
     return 0;
 }
 
-static int link_send_ping_response(link_ping_pkt_t* ping_pkt)
+static int link_send_ping_response(link_ping_pkt_t* ping_pkt, struct sockaddr_in *received_from_addr)
 {
     if (ping_pkt == NULL) {
         ERROR("No ping packet provided for response");
@@ -875,9 +930,17 @@ static int link_send_ping_response(link_ping_pkt_t* ping_pkt)
     }
 
     ping_pkt->pong = 1; // Indicate this is a pong response
-
-    ssize_t sent = sendto(link_ctx.send_sockfd, (const char*)ping_pkt, sizeof(link_packet_header_t) + ping_pkt->header.size, 0,
-                          (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    ssize_t sent;
+    if (ping_pkt->scan) {
+        sent = sendto(link_ctx.send_sockfd, (const char*)ping_pkt, sizeof(link_packet_header_t) + ping_pkt->header.size, 0,
+                            (struct sockaddr*)received_from_addr, sizeof(*received_from_addr));
+        printf("Sent PONG to scanning client %s:%d\n",
+               inet_ntoa(received_from_addr->sin_addr),
+               ntohs(received_from_addr->sin_port));
+    } else {
+        sent = sendto(link_ctx.send_sockfd, (const char*)ping_pkt, sizeof(link_packet_header_t) + ping_pkt->header.size, 0,
+                            (struct sockaddr*)&link_ctx.sender_addr, sizeof(link_ctx.sender_addr));
+    }
     if (sent < 0) {
         PERROR("Failed to send PONG packet");
         return -1;
