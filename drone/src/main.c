@@ -42,6 +42,7 @@ static void signal_handler(int sig)
 {
     printf("\n[ MAIN ] Caught signal %d, exit ...\n", sig);
     running = false;
+    remote_client_stop();
 }
 
 static void setup_signals(void)

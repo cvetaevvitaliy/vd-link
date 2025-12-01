@@ -40,6 +40,8 @@ struct drone_client_handle {
     void* command_callback_data;
 };
 
+static volatile bool terminate_requested = false;
+
 static int send_http_request(drone_client_handle_t* client, const char* method, 
                            const char* path, const char* body, char* response);
 static int register_drone(drone_client_handle_t* client);
@@ -575,7 +577,7 @@ int drone_client_start(drone_client_handle_t* client) {
     int delay = client->config.timeout_seconds > 0 ? client->config.timeout_seconds : 2; // Fixed delay
     bool infinite_retries = (max_retries == 0);
     
-    while (!client->connected) {
+    while (!client->connected && !terminate_requested) {
         attempt++;
         
         if (infinite_retries) {
@@ -614,6 +616,7 @@ int drone_client_start(drone_client_handle_t* client) {
 }
 
 int drone_client_stop(drone_client_handle_t* client) {
+    terminate_requested = true;
     if (!client) return DRONE_CLIENT_ERROR;
     if (!client->running) return DRONE_CLIENT_SUCCESS;
     
