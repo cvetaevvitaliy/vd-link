@@ -29,7 +29,12 @@ void link_cmd_rx_callback(link_command_id_t cmd_id, link_subcommand_id_t sub_cmd
         case LINK_SUBCMD_SYS_INFO:
             if (cmd_id == LINK_CMD_GET) {
                 link_sys_info_t sys_info;
-                strncpy(sys_info.variant, get_fc_variant(), sizeof(sys_info.variant));
+                const char* variant = get_fc_variant();
+                if (variant) {
+                    strncpy(sys_info.variant, variant, sizeof(sys_info.variant));
+                } else {
+                    strncpy(sys_info.variant, "UNK", sizeof(sys_info.variant));
+                }
                 link_send_cmd(LINK_CMD_ACK, LINK_SUBCMD_SYS_INFO, &sys_info, sizeof(sys_info));
             }
             break;

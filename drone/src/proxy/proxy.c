@@ -22,9 +22,12 @@ static int current_cmd_downlink_port = 0;
 static int current_cmd_uplink_port = 0;
 static int current_rc_port = 0;
 
+static int kill_proxy_processes(void);
+
 int proxy_init(void)
 {
     INFO("Proxy module initialized");
+    kill_proxy_processes(); // Clean up any existing processes on init
     return 0;
 }
 
