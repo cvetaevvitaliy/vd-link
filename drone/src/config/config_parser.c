@@ -742,11 +742,11 @@ void config_init_defaults(common_config_t *cfg)
 
     // Server connection defaults
     cfg->server_config.enabled = false;  // Disabled by default
-    strncpy(cfg->server_config.server_host, "hard-tech.org.ua", sizeof(cfg->server_config.server_host) - 1);
+    strncpy(cfg->server_config.server_host, "stream.hard-tech.org.ua", sizeof(cfg->server_config.server_host) - 1);
     cfg->server_config.server_port = 8000;
-    strncpy(cfg->server_config.drone_id, "drone-unknown", sizeof(cfg->server_config.drone_id) - 1);
+    strncpy(cfg->server_config.drone_id, "Drone-<cpu_serial>", sizeof(cfg->server_config.drone_id) - 1);
     cfg->server_config.heartbeat_interval = 30;
-    strncpy(cfg->server_config.owner_id, "owner-unknown", sizeof(cfg->server_config.owner_id) - 1);
+    strncpy(cfg->server_config.owner_id, "default", sizeof(cfg->server_config.owner_id) - 1);
     cfg->server_config.owner_id[sizeof(cfg->server_config.owner_id) - 1] = '\0';
     
     // Connection retry defaults

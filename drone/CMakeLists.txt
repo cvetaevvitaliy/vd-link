@@ -127,6 +127,7 @@ add_executable(${PROJECT_NAME}
         src/uart/uart.c
         src/msp-osd/msp_osd.c
         src/config/config_parser.c
+        src/config/drone_name.c
         src/screensaver/screensaver.c
         src/link_callbacks/link_callbacks.c
         src/hal/cpuinfo.c

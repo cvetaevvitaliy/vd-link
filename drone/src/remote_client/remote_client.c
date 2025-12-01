@@ -22,20 +22,26 @@ static void on_command(const char* command, const char* payload, void* user_data
     printf("[REMOTE_CLIENT] Command: %s, payload: %s\n", command, payload);
 }
 
-int fill_server_config_from_fc(server_connection_config_t* server_config, const char* fc_variant, const char* board_info, const char* fc_version, const char* craft_name, const char* uid) {
+int fill_server_config(server_connection_config_t* server_config,
+                       const char* fc_variant,
+                       const char* board_info,
+                       const char* fc_version,
+                       const char* drone_name,
+                       const char* fc_uid,
+                       const char* mcu_uid) {
     if (!server_config) {
         return -1;
     }
 
-    if (uid && uid[0] != '\0') {
-        strncpy(server_config->drone_id, uid, sizeof(server_config->drone_id) - 1);
-        server_config->drone_id[sizeof(server_config->drone_id) - 1] = '\0';
+    if (fc_uid && fc_uid[0] != '\0') {
+        strncpy(server_config->fc_serial, fc_uid, sizeof(server_config->fc_serial) - 1);
+        server_config->fc_serial[sizeof(server_config->fc_serial) - 1] = '\0';
     }
-    if (craft_name && craft_name[0] != '\0') {
-        strncpy(server_config->name, craft_name, sizeof(server_config->name) - 1);
+    if (drone_name && drone_name[0] != '\0') {
+        strncpy(server_config->name, drone_name, sizeof(server_config->name) - 1);
         server_config->name[sizeof(server_config->name) - 1] = '\0';
     }else {
-        snprintf(server_config->name, sizeof(server_config->name),"Drone-%s", uid ? uid : "unknown");
+        snprintf(server_config->name, sizeof(server_config->name),"Drone-%s", mcu_uid ? mcu_uid : "unknown");
     }
     if (fc_version && fc_version[0] != '\0') {
         strncpy(server_config->firmware_version, fc_version, sizeof(server_config->firmware_version) - 1);
@@ -48,6 +54,10 @@ int fill_server_config_from_fc(server_connection_config_t* server_config, const 
     if (fc_variant && fc_variant[0] != '\0') {
         strncpy(server_config->fc_variant, fc_variant, sizeof(server_config->fc_variant) - 1);
         server_config->fc_variant[sizeof(server_config->fc_variant) - 1] = '\0';
+    }
+    if (mcu_uid && mcu_uid[0] != '\0') {
+        strncpy(server_config->mcu_serial, mcu_uid, sizeof(server_config->mcu_serial) - 1);
+        server_config->mcu_serial[sizeof(server_config->mcu_serial) - 1] = '\0';
     }
 
     return 0;
@@ -73,24 +83,33 @@ int remote_client_init(const common_config_t* config) {
     printf("[REMOTE_CLIENT] Initializing connection to %s:%d (drone: %s)\n",
            config->server_config.server_host,
            config->server_config.server_port,
-           config->server_config.drone_id);
+           config->server_config.name);
     
     drone_client_config_t client_config;
     drone_client_config_init_default(&client_config);
     
+    // Server name
     strncpy(client_config.server_host, config->server_config.server_host, sizeof(client_config.server_host) - 1);
+    // Server port
     client_config.server_port = config->server_config.server_port;
-    strncpy(client_config.drone_id, config->server_config.drone_id, sizeof(client_config.drone_id) - 1);
+    // Drone ID - use MCU serial as unique identifier
+    strncpy(client_config.drone_id, config->server_config.mcu_serial, sizeof(client_config.drone_id) - 1);
+    // FC variant - from flight controller (BTFL, ARDU, INAV, etc.)
     strncpy(client_config.fc_variant, config->server_config.fc_variant, sizeof(client_config.fc_variant) - 1);
+    // HTTP Heartbeat and timeout settings
     client_config.heartbeat_interval = config->server_config.heartbeat_interval;
     client_config.max_retries = config->server_config.server_connect_max_retries;
     client_config.timeout_seconds = config->server_config.server_connect_retry_delay;
-    
+    // Drone name - will be visible in table on server
     strncpy(client_config.name, config->server_config.name, sizeof(client_config.name) - 1);
+    // Firmware version - from flight controller
     strncpy(client_config.firmware_version, config->server_config.firmware_version, sizeof(client_config.firmware_version) - 1);
+    // Hardware version - from flight controller
     strncpy(client_config.hardware_version, config->server_config.hardware_version, sizeof(client_config.hardware_version) - 1);
+    // Owner ID - from config (e.g., default, user123)
     strncpy(client_config.owner_id, config->server_config.owner_id, sizeof(client_config.owner_id) - 1);
 
+    // Capabilities, for now assume all enabled
     client_config.video_capable = true;
     client_config.telemetry_capable = true;
     client_config.commands_capable = true;

@@ -112,9 +112,11 @@ typedef struct {
     char server_host[256];
     int server_port;
     int heartbeat_interval;
-
-    char drone_id[32]; // UID from flight controller (e.g., 1234567890ABCDEF12345678)
-    char name[64]; // Craft name from flight controller (e.g., MyDrone)
+    char drone_id[64]; // Format string for drone name (e.g., Drone-<cpu_serial>)
+    
+    char fc_serial[32]; // UID from flight controller (e.g., 1F004C001950315154343920)
+    char mcu_serial[32]; // UID from MCU (e.g., cf17d5582095ad82)
+    char name[64]; // Drone name, filled from drone_id format string
     char firmware_version[10]; // Firmware version from flight controller (1.0.0, etc.)
     char hardware_version[32]; // Hardware version from flight controller (STF4, etc.)
     char fc_variant[5]; // Flight controller variant (BTFL, etc.)
