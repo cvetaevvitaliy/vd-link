@@ -237,6 +237,16 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    ret = link_init(LINK_DRONE);
+    if (ret != 0) {
+        printf("Failed to initialize link\n");
+        proxy_cleanup();
+        config_cleanup(&config);
+        return -1;
+    }
+
+    link_register_cmd_rx_cb(link_cmd_rx_callback);
+    link_register_rc_rx_cb(link_rc_rx_callback);
     // Start remote client connection and get stream config from server if enabled
     ret = remote_client_start();
     if (ret == 0 && config.server_config.enabled) {
@@ -251,17 +261,6 @@ int main(int argc, char *argv[])
             printf(" Command port: %d\n", server_command_port);
             printf(" Control port: %d\n", server_control_port);
 
-            /* // Uncomment for direct video and OSD streaming. Without drone-proxy
-            if (config.rtp_streamer_config.ip) {
-                free(config.rtp_streamer_config.ip);
-            }
-            config.rtp_streamer_config.ip = strdup(server_stream_ip);
-            config.rtp_streamer_config.port = server_stream_port;
-            
-            Configure link module to send telemetry/data to server telemetry port
-            link_set_remote(server_stream_ip, server_telemetry_port, server_command_port);
-            */
-
             // Setup proxy tunnels to redirect local ports to server
             ret = proxy_setup_tunnels(server_stream_ip, server_stream_port, server_telemetry_port, server_command_port, server_control_port);
             if (ret != 0) {
@@ -274,6 +273,8 @@ int main(int argc, char *argv[])
         } else {
             printf("Warning: Failed to get stream config from server, using config file values\n");
         }
+    } else {
+        printf("Remote client not enabled or failed to start, using local network configuration\n");
     }
 
     ret = rtp_streamer_init(&config);
@@ -289,18 +290,6 @@ int main(int argc, char *argv[])
     ret = encoder_init(&config.encoder_config);
     if (ret != 0) {
         printf("Failed to initialize encoder\n");
-        rtp_streamer_deinit();
-        remote_client_stop();
-        remote_client_cleanup();
-        proxy_cleanup();
-        config_cleanup(&config);
-        return -1;
-    }
-
-    ret = link_init(LINK_DRONE);
-    if (ret != 0) {
-        printf("Failed to initialize link\n");
-        encoder_clean();
         rtp_streamer_deinit();
         remote_client_stop();
         remote_client_cleanup();
