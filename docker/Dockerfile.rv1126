@@ -3,13 +3,15 @@ FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    sudo openssh-server build-essential cmake gdb rsync git curl unzip \
+    sudo openssh-server build-essential cmake gdb rsync git curl unzip pkg-config \
     python3 locales tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8  
 ENV LC_ALL=en_US.UTF-8
+ENV PKG_CONFIG_SYSROOT_DIR=/opt/sdk/arm-buildroot-linux-gnueabihf/sysroot
+ENV PKG_CONFIG_LIBDIR=${PKG_CONFIG_SYSROOT_DIR}/usr/lib/pkgconfig:${PKG_CONFIG_SYSROOT_DIR}/usr/share/pkgconfig
 
 RUN useradd -ms /bin/bash dev && echo "dev:dev" | chpasswd && adduser dev sudo
 
@@ -22,8 +24,8 @@ RUN chmod +x /opt/sdk/relocate-sdk.sh && \
 RUN chown -R dev:dev /opt/sdk
 
 RUN echo '#!/bin/bash\n\
-source /opt/sdk/environment-setup\n\
-exec "$@"' > /entry.sh && chmod +x /entry.sh
+    source /opt/sdk/environment-setup\n\
+    exec "$@"' > /entry.sh && chmod +x /entry.sh
 
 ENTRYPOINT ["/entry.sh"]
 CMD ["/usr/sbin/sshd", "-D"]
