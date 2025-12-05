@@ -129,8 +129,10 @@ static bool ensure_directory_exists(const char *path)
 
 static bool has_shared_object_extension(const char *name)
 {
-	size_t len = strlen(name);
-	return (len > 3 && strcmp(name + len - 3, ".so") == 0);
+    const char *target_suffix = "_addon.so";
+    size_t suffix_len = strlen(target_suffix); // 9
+    size_t len = strlen(name);
+    return (len > suffix_len && strcmp(name + len - suffix_len, target_suffix) == 0);
 }
 
 static size_t find_plugin_index_locked(const char *path)

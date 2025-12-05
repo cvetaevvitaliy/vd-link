@@ -12,6 +12,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define VDLINK_SUBSYSTEM_API_VERSION 1u
 
 #define VDLINK_SUBSYSTEM_DESCRIPTOR_FN "vdlink_get_subsystem_descriptor"
@@ -218,5 +222,9 @@ typedef struct {
 	subsystem_init_fn init;
 	subsystem_shutdown_fn shutdown;
 } subsystem_descriptor_t;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // VDLINK_SUBSYSTEM_API_H

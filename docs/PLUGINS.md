@@ -81,3 +81,16 @@ subsystems.
 
 At runtime you can copy new `.so` files into the watched directory (on the drone
 filesystem) and the daemon will handle (re)loading automatically.
+
+## Deployment
+
+To deploy a built plugin to the target board, copy the shared object file to the plugin directory.
+
+Default plugin directory: `/var/lib/vd-link/plugins`
+
+Example `scp` command:
+
+```bash
+ssh root@192.168.55.1 "mkdir -p /var/lib/vd-link/plugins"
+scp cmake-build-debug-docker-rv1126/drone/src/addons/plugins/sample_addon/sample_addon.so root@192.168.55.1:/var/lib/vd-link/plugins
+```
