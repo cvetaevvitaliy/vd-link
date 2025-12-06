@@ -14,6 +14,7 @@
 
 #ifdef PLATFORM_DESKTOP
 #include "sdl2_display.h"
+#include <sdl2_lvgl_input.h>
 #endif
 
 #ifdef PLATFORM_ROCKCHIP
@@ -242,8 +243,11 @@ int ui_init(void)
     sdl2_set_osd_frame_done_callback(drm_osd_frame_done_cb);
 #endif
 
-    tick_running = true;
-    pthread_create(&tick_tid, NULL, tick_thread, NULL);
+#ifdef PLATFORM_DESKTOP
+    if (sdl2_lvgl_input_init() != 0) {
+        printf("SDL2 input LVGL initialization failed\n");
+    }
+#endif
 
     //lang_set_english();
 
@@ -258,6 +262,11 @@ int ui_init(void)
     lv_obj_set_style_text_font(lv_scr_act(), &montserrat_cyrillic_medium_20, LV_STYLE_STATE_CMP_SAME);
     lv_obj_add_style(lv_screen_active(), &style_transp_bg, LV_STYLE_STATE_CMP_SAME);
     lv_obj_set_style_text_font(disp->perf_label, &montserrat_cyrillic_medium_16, LV_STYLE_STATE_CMP_SAME);
+
+    /* Disable scrolling and scrollbars on root screen */
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
 
     screens_init();
 #if 0
@@ -291,6 +300,9 @@ int ui_init(void)
     lv_obj_set_style_bg_color(blue_square, lv_color_make(0, 0, 255), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(blue_square, 128, LV_PART_MAIN);
 #endif
+
+    tick_running = true;
+    pthread_create(&tick_tid, NULL, tick_thread, NULL);
     return 0;
 }
 
@@ -300,6 +312,9 @@ void ui_deinit(void)
         printf("[ UI ] Not running, nothing to stop\n");
         return;
     }
+#if defined(PLATFORM_DESKTOP)
+    sdl2_lvgl_input_deinit();
+#endif
     pthread_mutex_lock(&lvgl_mutex);
     if (lv_is_initialized()) {
         lv_deinit();

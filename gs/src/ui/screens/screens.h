@@ -6,6 +6,8 @@
 #define SCREENS_H
 #include "status.h"
 #include "settings.h"
+#include "menu_right.h"
+#include "menu_left.h"
 
 void screens_init(void);
 

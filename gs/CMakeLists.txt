@@ -206,6 +206,14 @@ set(MSP_OSD_SRC
         src/ui/screens/screens.c
         src/ui/screens/status.c
         src/ui/screens/settings.c
+        src/ui/screens/menu_right.c
+        src/ui/screens/menu_left.c
+        src/system/battery.c
+        src/system/ping.c
+        src/system/sys_time.c
+        src/system/wifi.c
+        src/system/conn_api.c
+        src/system/drone_api.c
 )
 
 if("${TARGET}" STREQUAL "rk3566")
@@ -216,6 +224,7 @@ if("${TARGET}" STREQUAL "rk3566")
 elseif("${TARGET}" STREQUAL "desktop")
     list(APPEND SRC_COMMON
             src/sdl2_display.c
+            src/sdl2_lvgl_input.c
             src/decoder_pc.c
     )
 endif()
@@ -260,6 +269,9 @@ elseif ("${TARGET}" STREQUAL "desktop")
     )
 endif()
 
+if(APPLE)
+    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-no_warn_duplicate_libraries")
+endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
 if("${TARGET}" STREQUAL "desktop")

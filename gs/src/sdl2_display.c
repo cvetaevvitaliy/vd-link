@@ -5,7 +5,7 @@
  */
 
 #include "sdl2_display.h"
-
+#include "sdl2_lvgl_input.h"
 #include <SDL2/SDL.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -191,8 +191,10 @@ int sdl2_display_init(struct config_t *cfg)
         return -1;
     }
 
-    g_sdl.window = SDL_CreateWindow("VD-Link " GIT_TAG " (branch:" GIT_BRANCH "-" GIT_HASH ")", SDL_WINDOWPOS_CENTERED,
-                                    SDL_WINDOWPOS_CENTERED, INITIAL_WIDTH, INITIAL_HEIGHT,
+    g_sdl.window = SDL_CreateWindow("VD-Link " GIT_TAG " (branch:" GIT_BRANCH "-" GIT_HASH ")",
+                                    SDL_WINDOWPOS_CENTERED,
+                                    SDL_WINDOWPOS_CENTERED,
+                                    INITIAL_WIDTH, INITIAL_HEIGHT,
                                     SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!g_sdl.window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -201,8 +203,10 @@ int sdl2_display_init(struct config_t *cfg)
         return -1;
     }
 
+    SDL_StartTextInput();
+
     /* No vsync for minimal latency on desktop */
-    Uint32 renderer_flags = SDL_RENDERER_ACCELERATED;
+    Uint32 renderer_flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
     g_sdl.renderer = SDL_CreateRenderer(g_sdl.window, -1, renderer_flags);
     if (!g_sdl.renderer) {
         fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
@@ -271,7 +275,11 @@ int sdl2_display_init(struct config_t *cfg)
     g_sdl.overlay_buf_w = INITIAL_WIDTH;
     g_sdl.overlay_buf_h = INITIAL_HEIGHT;
 
-    g_sdl.overlay_tex = SDL_CreateTexture(g_sdl.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, g_sdl.overlay_tex_w, g_sdl.overlay_tex_h);
+    g_sdl.overlay_tex = SDL_CreateTexture(g_sdl.renderer,
+                                          SDL_PIXELFORMAT_ARGB8888,
+                                          SDL_TEXTUREACCESS_STREAMING,
+                                          g_sdl.overlay_tex_w,
+                                          g_sdl.overlay_tex_h);
     if (!g_sdl.overlay_tex) {
         fprintf(stderr, "SDL_CreateTexture(overlay) failed: %s\n", SDL_GetError());
         SDL_DestroyTexture(g_sdl.video_tex);
@@ -337,6 +345,7 @@ int sdl2_display_deinit(void)
         printf("[ SDL2 ] Not running, nothing to stop\n");
     }
     g_sdl.quit = true;
+    SDL_StopTextInput();
 
     if (g_sdl.osd_lock) {
         SDL_DestroyMutex(g_sdl.osd_lock);
@@ -500,6 +509,10 @@ int sdl2_display_poll(void)
     /* Handle events (close window, resize, ESC, double click) */
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+
+#ifdef PLATFORM_DESKTOP
+        sdl2_lvgl_input_process_event(&ev);
+#endif
         if (ev.type == SDL_QUIT) {
             g_sdl.quit = true;
             return -1;
@@ -577,6 +590,11 @@ int sdl2_display_poll(void)
     }
 
     SDL_Rect dst = sdl2_compute_dst_rect(logical_w, logical_h);
+
+#ifdef PLATFORM_DESKTOP
+    /* Sync LVGL input viewport with actual rendered LVGL+OSD scene rectangle */
+    sdl2_lvgl_input_set_viewport(dst.x, dst.y, dst.w, dst.h);
+#endif
 
     /* Render video + overlay */
     SDL_SetRenderDrawColor(g_sdl.renderer, 0, 0, 0, 255);

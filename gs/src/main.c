@@ -26,7 +26,7 @@
 #include "src/drm_display.h"
 #endif
 
-static volatile int running = 1;
+static volatile bool running = false;
 
 static void signal_handler(int sig)
 {
@@ -145,6 +145,7 @@ int main(int argc, char* argv[])
     msp_osd_init(&config);
 
     ui_init();
+    running = true;
 
     while (running) {
 #ifdef PLATFORM_DESKTOP
