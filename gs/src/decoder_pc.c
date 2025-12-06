@@ -327,8 +327,8 @@ static void *decoder_thread_func(void *arg)
             if (now - last_fps_time >= 1000) {
                 current_fps = frames_in_sec * 1000.0 / (double)(now - last_fps_time);
 #if 1
-                printf("[DECODER] FPS: %.2f\n", current_fps);
-                ui_set_fps(current_fps);
+                //printf("[DECODER] FPS: %.2f\n", current_fps);
+                ui_set_fps((float)current_fps);
 #endif
                 frames_in_sec = 0;
                 last_fps_time = now;
@@ -364,7 +364,7 @@ int decoder_start(struct config_t *cfg)
 
     printf("[DECODER] Initializing libavcodec decoder...\n");
 
-    /* mute FFmpeg logs (надокучливі PPS/NALU warnings) */
+    /* mute FFmpeg logs (PPS/NALU warnings) */
     av_log_set_level(AV_LOG_QUIET);
 
     const AVCodec *codec = avcodec_find_decoder(codec_id);

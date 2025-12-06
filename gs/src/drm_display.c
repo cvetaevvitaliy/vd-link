@@ -1310,6 +1310,10 @@ void drm_push_new_osd_frame(const void *src_addr, int width, int height)
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
 #endif
+    if (!src_addr) {
+        printf("[ DRM ] OSD source address is NULL\n");
+        return;
+    }
     if (width != OSD_WIDTH || height != OSD_HEIGHT) {
         printf("[ DRM ] OSD frame must be %dx%d - yours is: %dx%d\n", OSD_WIDTH, OSD_HEIGHT, width, height);
         return;
@@ -1318,7 +1322,7 @@ void drm_push_new_osd_frame(const void *src_addr, int width, int height)
     struct drm_fb_t *fb = &osd_bufs[render];
     int rotate = drm_context.rotate;
     // Clear previous frame
-    memset(fb->buff_addr, 0x00, OSD_WIDTH * OSD_HEIGHT * 4);
+    //memset(fb->buff_addr, 0x00, OSD_WIDTH * OSD_HEIGHT * 4);
 
     if (rotate == 0) {
         // No rotation: direct copy
